@@ -29,7 +29,7 @@ nonbonded_kernel_or_deriv_over_r(float r_mag2)
     return return_deriv ? 2.f*V.y() : V.x();
 }
 
-Int4 acceptable_backbone_pair(const Int4& id1, const Int4& id2) {
+Int4 acceptable_backbone_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
         auto sequence_exclude = Int4(1);
         return (sequence_exclude < id1-id2) | (sequence_exclude < id2-id1);
 }
@@ -49,13 +49,15 @@ struct BackbonePairs : public PotentialNode
     PairlistComputation<true> pairlist;
     unique_ptr<int32_t[]> id;
     float dist_cutoff;
+    Int4 l_start;
 
     BackbonePairs(hid_t grp, CoordNode& alignment_):
         PotentialNode(),
         n_residue(get_dset_size(1, grp, "id")[0]), alignment(alignment_), 
         params(n_residue), ref_pos(n_residue),
         pairlist(n_residue, n_residue, (n_residue*(n_residue-1))/2),
-        id(new_aligned<int32_t>(n_residue,16))
+        id(new_aligned<int32_t>(n_residue,16)),
+        l_start(Int4(0))
     {
         check_elem_width(alignment, 7);
 
@@ -101,7 +103,7 @@ struct BackbonePairs : public PotentialNode
         // acceptable_backbone_pair checks that nr2>=nr1+2
         pairlist.template find_edges<acceptable_backbone_pair>(dist_cutoff,
                 coords.x.get(), coords.row_width, id.get(),
-                coords.x.get(), coords.row_width, id.get());
+                coords.x.get(), coords.row_width, id.get(), l_start);
         int n_edge = pairlist.n_edge;
 
         for(int ne=0; ne<n_edge; ne++) {

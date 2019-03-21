@@ -20,6 +20,9 @@ deg=np.deg2rad(1)
 
 default_filter = tb.Filters(complib='zlib', complevel=5, fletcher32=True)
 n_bit_rotamer = 4
+n_bit_resid = (5000).bit_length() # Take care not excede maximum value of int for rotamer id bitfield
+# ToDo: change type of all id variables in interaction_graph.h to uint32_t to accomodate a larger residue limit
+# ToDo: instead change field to chainid
 
 def highlight_residues(name, fasta, residues_to_highlight):
     fasta_one_letter = [one_letter_aa[x] for x in fasta]
@@ -1062,6 +1065,7 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic
     layer_index = []
     beadtype_seq = []
     id_seq = []
+    id_seq_map = np.zeros(len(fasta))
     ref_chi1_state = []
 
     count_by_n_rot = dict()
@@ -1088,7 +1092,35 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic
         affine_residue.extend([rnum]*(stop-start))
         layer_index   .extend(np.arange(start,stop))
         beadtype_seq  .extend(['%s_%i'%(aa,i) for i in range(n_bead)]*n_rot)
-        id_seq        .extend(np.arange(stop-start)//n_bead + (base_id<<n_bit_rotamer))
+        id_seq_rot = np.arange(stop-start)//n_bead + (base_id<<n_bit_rotamer) # bitfield w/rotamer info
+        id_seq_rnum = np.array([((k<<n_bit_resid) + rnum) for k in id_seq_rot]) # shift bitfield to make room for resid
+        id_seq        .extend(id_seq_rnum)
+
+        if np.any(id_seq_rnum > 2147483647):
+            raise ValueError('A rotamer id has exceeded the maximum C++ int32 size. See comments for variable n_bit_resid.')
+
+        ## bitfield debugging
+        # print ("start:", start, "stop:", stop, "n_bead", n_bead, "base_id:", base_id, "n_rot:", n_rot, "count_by_n_rot[n_rot]:", count_by_n_rot[n_rot], 
+        #        np.arange(stop-start)//n_bead, base_id<<n_bit_rotamer)
+        # id_q = id_seq_rnum[0]
+        # selector = (1 << n_bit_resid) - 1
+        # print "selector:", selector
+        # resid = id_q & selector
+        # print "id_q:", id_q, "resid:", resid, "rnum:", rnum
+        # id_q >>= n_bit_resid
+        # id_q = id_seq_rot[0]
+        # selector = (1 << n_bit_rotamer) - 1
+        # print "selector:", selector
+        # rot_q = id_q & selector
+        # print "id_q:", id_q, "rot_q:", rot_q
+        # id_q >>= n_bit_rotamer
+        # n_rot = id_q & selector
+        # print "id_q:", id_q, "n_rot:", n_rot
+        # id_q >>= n_bit_rotamer
+        # print "id_q:", id_q
+        # print
+
+    # print id_seq
 
     sc_node_name = 'placement%s_point_vector_only' % ('' if dynamic_placement else '_fixed')
     grp = t.create_group(potential, sc_node_name)
@@ -1493,6 +1525,10 @@ def main():
 
     global n_atom, t, potential
     n_res = len(fasta_seq)
+    if n_res > 2**n_bit_resid:
+        raise ValueError("Number of residues cannot exceede %d. The real limit is a few times lower than this "
+                         "due to the other elements in the rotamer id bitfield. See variable n_bit_resid and "
+                         "write_rotamer_placement() in this script." % 2**n_bit_resid)
     n_atom = 3*n_res
 
     t = tb.open_file(args.output,'w')

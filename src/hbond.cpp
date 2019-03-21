@@ -159,7 +159,7 @@ namespace {
             return sqrtf(radial_cutoff2); // FIXME make parameter dependent
         }
 
-        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
+        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
             return Int4() == Int4();  // No exclusions (all true)
         }
 
@@ -251,7 +251,7 @@ namespace {
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
         }
 
-        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
+        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
             // return Int4() == Int4();  // No exclusions (all true)
             // return id1 != id2; // exclude interactions on the same residue
             auto sequence_exclude = Int4(2);  // exclude i,i, i,i+1, and i,i+2

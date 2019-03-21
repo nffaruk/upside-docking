@@ -30,7 +30,7 @@ static T&& message(const std::string& s, T&& x) {
 
 template <bool symmetric>
 struct PairlistComputation {
-    typedef Int4(*acceptable_id_pair_t)(const Int4&,const Int4&);
+    typedef Int4(*acceptable_id_pair_t)(const Int4&,const Int4&,const Int4&);
     public:
         const int n_elem1, n_elem2;
         std::unique_ptr<int32_t[]>  edge_indices1, edge_indices2;
@@ -51,7 +51,7 @@ struct PairlistComputation {
         void ensure_cache_valid(
                 float cutoff,
                 const float* aligned_pos1, const int pos1_stride, int* id1, 
-                const float* aligned_pos2, const int pos2_stride, int* id2)
+                const float* aligned_pos2, const int pos2_stride, int* id2, Int4 l_start)
         {
             Timer t1("pairlist_cache_check");
             // Find maximum deviation from cached positions to determine if cache must be rebuilt
@@ -139,7 +139,7 @@ struct PairlistComputation {
                     auto my_id2 = Int4((symmetric?cache_id1:cache_id2)[i2]);
                     auto i2_vec = Int4(i2);
 
-                    Int4 is_hit = acceptable_id_pair(my_id1,my_id2) & (symmetric 
+                    Int4 is_hit = acceptable_id_pair(my_id1,my_id2,l_start) & (symmetric 
                         ? (i1_vec<i2_vec) & near.cast_int()
                         :                   near.cast_int());
                     int is_hit_bits = is_hit.movemask();
@@ -201,11 +201,11 @@ struct PairlistComputation {
         template<acceptable_id_pair_t acceptable_id_pair>
         void find_edges(float cutoff,
                         const float* aligned_pos1, const int pos1_stride, int* id1, 
-                        const float* aligned_pos2, const int pos2_stride, int* id2) {
+                        const float* aligned_pos2, const int pos2_stride, int* id2, Int4 l_start) {
             // Timer timer_total("find_edges");
             ensure_cache_valid<acceptable_id_pair>(cutoff,
                     aligned_pos1, pos1_stride, id1,
-                    aligned_pos2, pos2_stride, id2);
+                    aligned_pos2, pos2_stride, id2, l_start);
             // Timer timer("pairlist_refine");
 
             int ne=0;
@@ -281,6 +281,8 @@ struct InteractionGraph{
 
     std::unique_ptr<int32_t[]>  types1, types2; // pair type is type[0]*n_types2 + type[1]
     std::unique_ptr<int32_t[]>  id1,    id2;    // used to avoid self-interaction
+    std::unordered_map<int32_t, int> umap;
+    Int4 l_start; // defines start of ligand, for inter-protein interaction 
 
     // buffers to copy position data to ensure contiguity
     std::unique_ptr<float[]> pos1, pos2;
@@ -318,6 +320,8 @@ struct InteractionGraph{
 
         types1(new_aligned<int32_t>(n_elem1,16)), types2(new_aligned<int32_t>(n_elem2,16)),
         id1   (new_aligned<int32_t>(n_elem1,16)), id2   (new_aligned<int32_t>(n_elem2,16)),
+
+        l_start(Int4(h5::read_attribute<int32_t>(grp, ".", "l_start", 0))),
 
         pos1(new_aligned<float>(round_up(n_elem1,16)*n_dim1a,             align_bytes)),
         pos2(new_aligned<float>(round_up(symmetric?16:n_elem2,16)*n_dim2a, align_bytes)),
@@ -458,7 +462,7 @@ struct InteractionGraph{
         {
             pairlist.template find_edges<IType::acceptable_id_pair>(cutoff,
                                 pos1.get(), n_dim1a, id1.get(),
-                                (symmetric?pos1:pos2).get(), n_dim2a, (symmetric?id1:id2).get());
+                                (symmetric?pos1:pos2).get(), n_dim2a, (symmetric?id1:id2).get(), l_start);
             n_edge = pairlist.n_edge;
         }
         // printf("n_edge for n_dim1 %i n_dim2 %i n_elem1 %i n_elem2 %i is %i\n", n_dim1, n_dim2, n_elem1, n_elem2, n_edge);

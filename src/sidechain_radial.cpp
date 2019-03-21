@@ -38,7 +38,7 @@ struct RadialHelper {
         return true;
     }
 
-    static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
+    static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
         auto sequence_exclude = Int4(2);
         return (sequence_exclude < id1-id2) | (sequence_exclude < id2-id1);
     }
@@ -207,43 +207,34 @@ struct CooperationContacts : public PotentialNode
 {
     struct Param {
         index_t   loc[2];
-        float     energy;
-        float     dist;
-        float     scale;  // 1.f/width
-        float     cutoff;
     };
 
     float energy;
     int n_contact;
     CoordNode& bead_pos;
     vector<Param> params;
+    float p_energy;
+    float p_dist;
+    float p_scale;  // 1.f/width
+    float p_cutoff;
     vector<float> dists;
     vector<Vec<2> > contacts;
-    float cutoff;
 
     CooperationContacts(hid_t grp, CoordNode& bead_pos_):
         PotentialNode(),
         n_contact(get_dset_size(2, grp, "id")[0]),
         bead_pos(bead_pos_), 
         params(n_contact),
+        p_energy(read_attribute<float>(grp, ".", "energy")),
+        p_dist(read_attribute<float>(grp, ".", "dist")),
+        p_scale(1.f/read_attribute<float>(grp, ".", "width")),
+        p_cutoff(p_dist + 1.f/p_scale),
         dists(n_contact),
         contacts(n_contact)
     {
         check_size(grp, "id",       n_contact, 2);
-        check_size(grp, "distance", n_contact);
-        check_size(grp, "width",    n_contact);
-        check_size(grp, "energy",   n_contact);
 
         traverse_dset<2,int  >(grp, "id",       [&](size_t nc, size_t i, int x){params[nc].loc[i] = x;});
-        traverse_dset<1,float>(grp, "distance", [&](size_t nc, float x){params[nc].dist = x;});
-        traverse_dset<1,float>(grp, "width",    [&](size_t nc, float x){params[nc].scale = 1.f/x;});
-        traverse_dset<1,float>(grp, "energy",   [&](size_t nc, float x){params[nc].energy = x;});
-
-        for(auto &p: params) p.cutoff = p.dist + 1.f/p.scale;
-
-        energy = 1.0;
-        for(auto &p: params) energy *= p.energy;
-        energy = pow(energy, 1.f/n_contact);
 
         if(logging(LOG_DETAILED)) {
             default_logger->add_logger<float>("cooperation_contacts", {bead_pos.n_elem}, 
@@ -254,9 +245,9 @@ struct CooperationContacts : public PotentialNode
                        float en = 1.f;
                        for(const auto &p: params) {
                            auto dist = mag(load_vec<3>(pos, p.loc[0]) - load_vec<3>(pos, p.loc[1]));
-                           en *= compact_sigmoid(dist-p.dist, p.scale)[0];
+                           en *= compact_sigmoid(dist-p_dist, p_scale)[0];
                        }
-                       en = energy * pow(en, 1.f/n_contact);
+                       en = p_energy * en;
 
                        for(const auto &p: params) {
                            buffer[p.loc[0]] += 0.5f*en;
@@ -281,15 +272,11 @@ struct CooperationContacts : public PotentialNode
             auto disp = load_vec<3>(pos, p.loc[0]) - load_vec<3>(pos, p.loc[1]);
             auto dist = mag(disp);
             dists[nc] = dist;
-            Vec<2> contact = compact_sigmoid(dist-p.dist, p.scale);
+            Vec<2> contact = compact_sigmoid(dist-p_dist, p_scale);
             contacts[nc] = contact;
             product_contact *= contact.x();
         }
-
-        // S**(1/N)
-        float exponent = 1.f/n_contact;
-        product_contact = pow(product_contact, exponent);
-        potential = product_contact * energy;
+        potential = p_energy * product_contact;
 
         // calc force
         if( product_contact > 0.f and product_contact<1.f) {
@@ -299,7 +286,7 @@ struct CooperationContacts : public PotentialNode
 
                 auto disp = load_vec<3>(pos, p.loc[0]) - load_vec<3>(pos, p.loc[1]);
                 auto contact = contacts[nc];
-                auto deriv = exponent * (potential*contact.y()*rcp(contact.x())*rcp(dist)) * disp;
+                auto deriv = potential*contact.y()*rcp(contact.x())*rcp(dist) * disp;
 
                 update_vec(sens, p.loc[0],  deriv);
                 update_vec(sens, p.loc[1], -deriv);

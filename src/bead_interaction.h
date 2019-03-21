@@ -129,6 +129,10 @@ namespace {
         }
 
     constexpr static const int n_bit_rotamer = 4; // max number of rotamers is 2**n_bit_rotamer
+    constexpr static const int n_bit_resid = 13; // max number of residues is 2**n_bit_resid
+    static const auto i4_resid_sele = Int4((1u<<n_bit_resid) - 1u);
+    static const auto i4_zero = Int4(0);
+    static const auto i4_one = Int4(1);
 
     struct PosDistSplineInteraction {
         // spline-based distance interaction
@@ -150,8 +154,8 @@ namespace {
             return true;
         }
 
-        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
-            return id1.srl(n_bit_rotamer) != id2.srl(n_bit_rotamer);
+        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
+            return (id1 & i4_resid_sele) != (id2 & i4_resid_sele);
         }
 
         static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
@@ -192,8 +196,72 @@ namespace {
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
         }
 
-        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2) {
-            return id1.srl(n_bit_rotamer) != id2.srl(n_bit_rotamer);
+        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
+            return (id1 & i4_resid_sele) != (id2 & i4_resid_sele); //(id1.srl(n_bit_resid)).srl(n_bit_rotamer) != (id2.srl(n_bit_resid)).srl(n_bit_rotamer);
+        }
+
+        static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
+                const Vec<n_dim1,Float4> &sc_pos1, const Vec<n_dim2,Float4> &sc_pos2) {
+            return quadspline<n_knot_angular, n_knot>(d1,d2, inv_dtheta,inv_dx,p, sc_pos1,sc_pos2);
+        }
+
+        static void param_deriv(Vec<n_param> &d_param, const float* p,
+                const Vec<n_dim1> &sc_pos1, const Vec<n_dim2> &sc_pos2) {
+            quadspline_param_deriv<n_knot_angular, n_knot>(d_param, inv_dtheta,inv_dx,p, sc_pos1,sc_pos2);
+        }
+
+        static bool is_compatible(const float* p1, const float* p2) {
+            for(int nka: range(n_knot_angular))
+                if(p1[nka]!=p2[nka+n_knot_angular] || p1[nka+n_knot_angular]!=p2[nka])
+                    throw std::string("bad angular match");
+            for(int nk: range(2*n_knot))
+                if(p1[2*n_knot_angular + nk] != p2[2*n_knot_angular + nk])
+                    return false;
+
+            return true;
+        }
+};
+
+    struct InterQuadSpline {
+        // For interactions accross receptor and ligand residues
+        // radius scale angular_width angular_scale
+        // first group is donors; second group is acceptors
+
+        constexpr static bool  symmetric = true;
+        constexpr static int   n_knot = N_KNOT_SC_SC, n_knot_angular=N_KNOT_ANGULAR;
+        constexpr static int   n_param=2*n_knot_angular+2*n_knot, n_dim1=6, n_dim2=6, simd_width=1;
+        constexpr static float inv_dx = 1.f/KNOT_SPACING, inv_dtheta = (n_knot_angular-3)/2.f;
+
+        static float cutoff(const float* p) {
+            return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
+        }
+
+        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
+            auto id1_res = id1 & i4_resid_sele;
+            auto id2_res = id2 & i4_resid_sele;
+
+            // Debugging
+            // Int4 first_term = (id1_res != id2_res);
+            // Int4 second_term = (l_start == Int4(0));
+            // Int4 third_term = ((id1_res < l_start) & ((l_start-Int4(1)) < id2_res));
+            // Int4 fourth_term = (((l_start-Int4(1)) < id1_res) & (id2_res < l_start));
+            // Int4 combo_term = (id1_res != id2_res) & (second_term |
+            //                                third_term |
+            //                                fourth_term);
+
+            // printf("id1: (%i,%i,%i,%i), id2: (%i,%i,%i,%i)\n", id1_res.x(), id1_res.y(), id1_res.z(), id1_res.w(),
+            //                                                    id2_res.x(), id2_res.y(), id2_res.z(), id2_res.w());
+            // printf("first: (%i,%i,%i,%i)\n", first_term.x(), first_term.y(), first_term.z(), first_term.w());
+            // printf("second: (%i,%i,%i,%i)\n", second_term.x(), second_term.y(), second_term.z(), second_term.w());
+            // printf("third: (%i,%i,%i,%i)\n", third_term.x(), third_term.y(), third_term.z(), third_term.w());
+            // printf("fourth: (%i,%i,%i,%i)\n", fourth_term.x(), fourth_term.y(), fourth_term.z(), fourth_term.w());
+            // printf("combo: (%i,%i,%i,%i)\n", combo_term.x(), combo_term.y(), combo_term.z(), combo_term.w());
+
+            return (id1_res != id2_res) & ((l_start == i4_zero) |
+                                           ((id1_res < l_start) & ((l_start-i4_one) < id2_res)) |
+                                           (((l_start-i4_one) < id1_res) & (id2_res < l_start)));
+
+            // return Int4(0) == Int4(1);
         }
 
         static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
