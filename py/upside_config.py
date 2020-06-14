@@ -236,6 +236,7 @@ def write_environment(fasta, environment_library, sc_node_name, pl_node_name):
         energies    = lib.root.energies[:]
         energies_x_offset = lib.root.energies._v_attrs.offset
         energies_x_inv_dx = lib.root.energies._v_attrs.inv_dx
+        weights           = lib.root.weights[:]
 
         restype_order = dict([(str(x),i) for i,x in enumerate(lib.root.restype_order[:])])
 
@@ -284,31 +285,24 @@ def write_environment(fasta, environment_library, sc_node_name, pl_node_name):
 
     # group 2 is the weighted points to interact with
     create_array(cgrp, 'index2', np.arange(n_sc))
-    create_array(cgrp, 'type2',  0*np.arange(n_sc))   # for now coverage is very simple, so no types on SC
+    # No types on SC during igraph computation. Role of SC typing pushed off to aa_types for weighting
+    # during coupling
+    create_array(cgrp, 'type2',  0*np.arange(n_sc))
     create_array(cgrp, 'id2',    sc_node.affine_residue[:])
 
     create_array(cgrp, 'interaction_param', coverage_param)
-
-    # # Transform coverage to [0,1] scale (1 indicates the most buried)
-    # tgrp = t.create_group(potential, 'uniform_transform_environment')
-    # tgrp._v_attrs.arguments = np.array(['environment_coverage'])
-    # create_array(tgrp, 'bspline_coeff', coverage_transform)
-    # tgrp.bspline_coeff._v_attrs.spline_offset = coverage_transform_offset
-    # tgrp.bspline_coeff._v_attrs.spline_inv_dx = coverage_transform_inv_dx
-
-    # # Linearly couple the transform to energies
-    # egrp = t.create_group(potential, 'linear_coupling_uniform_environment')
-    # egrp._v_attrs.arguments = np.array(['uniform_transform_environment'])
-    # create_array(egrp, 'couplings', energies)
-    # create_array(egrp, 'coupling_types', [restype_order[s] for s in fasta])
+    create_array(cgrp, 'aa_types', [restype_order[s] for s in fasta])
 
     # Couple an energy to the coverage coordinates
     egrp = t.create_group(potential, 'nonlinear_coupling_environment')
     egrp._v_attrs.arguments = np.array(['environment_coverage'])
+    egrp._v_attrs.number_independent_weights = 400 # 1, or 20, or 400
+
     create_array(egrp, 'coeff', energies)
     egrp.coeff._v_attrs.spline_offset = energies_x_offset
     egrp.coeff._v_attrs.spline_inv_dx = energies_x_inv_dx
     create_array(egrp, 'coupling_types', [restype_order[s] for s in fasta])
+    create_array(egrp, 'weights', weights)
 
 
 def write_count_hbond(fasta, hbond_energy, coverage_library, loose_hbond, sc_node_name):
@@ -1100,7 +1094,7 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic
             raise ValueError('A rotamer id has exceeded the maximum C++ int32 size. See comments for variable n_bit_resid.')
 
         ## bitfield debugging
-        # print ("start:", start, "stop:", stop, "n_bead", n_bead, "base_id:", base_id, "n_rot:", n_rot, "count_by_n_rot[n_rot]:", count_by_n_rot[n_rot], 
+        # print ("start:", start, "stop:", stop, "n_bead", n_bead, "base_id:", base_id, "n_rot:", n_rot, "count_by_n_rot[n_rot]:", count_by_n_rot[n_rot],
         #        np.arange(stop-start)//n_bead, base_id<<n_bit_rotamer)
         # id_q = id_seq_rnum[0]
         # selector = (1 << n_bit_resid) - 1
