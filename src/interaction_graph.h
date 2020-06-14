@@ -139,7 +139,7 @@ struct PairlistComputation {
                     auto my_id2 = Int4((symmetric?cache_id1:cache_id2)[i2]);
                     auto i2_vec = Int4(i2);
 
-                    Int4 is_hit = acceptable_id_pair(my_id1,my_id2,l_start) & (symmetric 
+                    Int4 is_hit = acceptable_id_pair(my_id1,my_id2,l_start) & (symmetric
                         ? (i1_vec<i2_vec) & near.cast_int()
                         :                   near.cast_int());
                     int is_hit_bits = is_hit.movemask();
@@ -282,7 +282,7 @@ struct InteractionGraph{
     std::unique_ptr<int32_t[]>  types1, types2; // pair type is type[0]*n_types2 + type[1]
     std::unique_ptr<int32_t[]>  id1,    id2;    // used to avoid self-interaction
     std::unordered_map<int32_t, int> umap;
-    Int4 l_start; // defines start of ligand, for inter-protein interaction 
+    Int4 l_start; // defines start of ligand, for inter-protein interaction
 
     // buffers to copy position data to ensure contiguity
     std::unique_ptr<float[]> pos1, pos2;
