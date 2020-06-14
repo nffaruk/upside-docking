@@ -176,6 +176,9 @@ def main():
             chain_resnum.append((str(chain_id),r.resnum))
         print
     coords = np.array(coords)
+    # com_init = coords.mean(axis=0)
+    # with open(args.basename + ".com_init.pkl", 'wb') as f:
+    #     cPickle.dump(com_init, f)
     if not args.disable_recentering:
         coords -= coords.mean(axis=0) # move com to origin
     chi = np.array(chi)
