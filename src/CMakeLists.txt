@@ -3,7 +3,8 @@ project(upside CXX C)
 
 set (CMAKE_MODULE_PATH "../cmake;${CMAKE_MODULE_PATH}")
 find_package(HDF5 REQUIRED COMPONENTS C)
-find_package(OpenMP QUIET)
+#cmake_policy(SET CMP0054 NEW)
+find_package(OpenMP)
 
 set(ARCH "native" CACHE STRING "architecture to use for -march flag to compiler")
 
