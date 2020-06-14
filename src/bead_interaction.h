@@ -230,7 +230,7 @@ namespace {
         constexpr static bool  symmetric = true;
         constexpr static int   n_knot = N_KNOT_SC_SC, n_knot_angular=N_KNOT_ANGULAR;
         constexpr static int   n_param=2*n_knot_angular+2*n_knot, n_dim1=6, n_dim2=6, simd_width=1;
-        constexpr static float inv_dx = 1.f/KNOT_SPACING, inv_dtheta = (n_knot_angular-3)/2.f;
+        constexpr static float inv_dx = 1.f/0.75f, inv_dtheta = (n_knot_angular-3)/2.f;
 
         static float cutoff(const float* p) {
             return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
