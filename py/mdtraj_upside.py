@@ -4,6 +4,8 @@ import cPickle as cp
 import numpy as np
 import mdtraj.core.element as el
 import mdtraj as md
+from Bio import pairwise2
+from Bio.SubsMat.MatrixInfo import blosum90
 
 from mdtraj.formats.registry import FormatRegistry
 angstrom=0.1  # conversion to nanometer from angstrom
@@ -116,11 +118,11 @@ def traj_from_upside(seq, time, pos, chain_first_residue=[0]):
 
 
 @FormatRegistry.register_loader('.up')
-def load_upside_traj(fname, stride=1, from_init=False, fasta_fn='', chain_breaks_fn='', target_pos_only=False):
+def load_upside_traj(fname, stride=1, external_pos=[], from_init=False, fasta_fn='', chain_breaks_fn='', target_pos_only=False, initial_pos_only=False):
     import tables as tb
 
-    if from_init and target_pos_only:
-        raise ValueError("Cannot have both from_init and target_pos_only.")
+    if (from_init and (target_pos_only or initial_pos_only)) or (target_pos_only and initial_pos_only):
+        raise ValueError("Cannot have any combination of from_init, target_pos_only, and initial_pos_only.")
     if from_init and not fasta_fn:
         raise ValueError("from_init requires fasta_fn set.")
 
@@ -149,6 +151,8 @@ def load_upside_traj(fname, stride=1, from_init=False, fasta_fn='', chain_breaks
         with tb.open_file(fname) as t:
             if target_pos_only:
                 xyz.append(t.root.target.pos[:,:,0])
+            elif initial_pos_only:
+                xyz.append(t.root.input.pos[:,:,0])
             else:
                 for g_no, g in enumerate(_output_groups(t)):
                     # take into account that the first frame of each pos is the same as the last frame before restart
@@ -164,8 +168,15 @@ def load_upside_traj(fname, stride=1, from_init=False, fasta_fn='', chain_breaks
 
             if 'chain_break' in t.root.input:
                 chain_first_residue = np.append(chain_first_residue, t.root.input.chain_break.chain_first_residue[:])
-     
-    if from_init or target_pos_only:
+    
+    if len(external_pos) > 0:
+        if from_init or target_pos_only or initial_pos_only:
+            assert external_pos.shape[1:] == xyz[0].shape[:]
+        else:
+            assert external_pos.shape[1:] == xyz[0].shape[1:]
+        xyz = external_pos[::stride]
+        time = [np.arange(len(xyz))]
+    elif from_init or target_pos_only or initial_pos_only:
         xyz = np.array(xyz)
         time.append(np.zeros(1,dtype='f4'))
     else:
@@ -257,9 +268,9 @@ def kmeans_cluster(pc, rmsd, n_clusters):
 def extract_bb_pos_angstroms(traj):
     # extract N,CA,C positions for measurements
     bb_sele = traj.top.select("backbone")
-    bb_atoms =  [(a.serial,a.index) for a in traj.atom_slice(bb_sele).top.atoms if a.name in ('N','CA','C')]
+    bb_3 =  np.array([a.index for a in traj.atom_slice(bb_sele).top.atoms if a.name in ('N','CA','C')])
     # Must convert distances to angstroms
-    pos = 10.*traj.atom_slice(bb_sele).xyz[:,np.array([index for serial,index in sorted(bb_atoms)])]
+    pos = 10.*traj.atom_slice(bb_sele).xyz[:,np.array(bb_3)]
     assert pos.shape[1] == traj.n_residues*3
     return pos
 
@@ -329,7 +340,152 @@ def replex_demultiplex(list_of_replex_traj, replica_index):
     n_frame = list_of_replex_traj[0].n_frames
     n_atom  = list_of_replex_traj[0].n_atoms
 
+class f_nat_computer:
 
+    def __init__(self, r_pdb, l_pdb, cutoff = 5.):
+        self.cutoff = cutoff
+        combo_pdb = r_pdb.stack(l_pdb)
+
+        n_res_r = r_pdb.n_residues
+        n_res_l = l_pdb.n_residues
+        res_g1 = np.arange(n_res_r)
+        res_g2 = np.arange(n_res_l) + n_res_r
+        self.pair_list = np.array([(res1,res2) for res1 in res_g1 for res2 in res_g2])
+
+        contact_data = md.compute_contacts(combo_pdb, contacts=self.pair_list, scheme='closest')
+        is_contact = (10.*contact_data[0] < self.cutoff)[0]
+        self.contacts_n = self.pair_list[is_contact]
+        self.n_contacts_n = len(self.contacts_n)
+
+        # trick into treating rows as a single value for np.intersect1d()
+        # https://stackoverflow.com/questions/8317022/get-intersecting-rows-across-two-2d-numpy-arrays
+        nr_n, nc_n = self.contacts_n.shape
+        self.dtype_n = {'names':['f{}'.format(i) for i in xrange(nc_n)],
+                        'formats':nc_n * [self.contacts_n.dtype]}
+
+    def compute_f_nat(self, r_pdb, l_decoy):
+        combo_pdb = r_pdb.stack(l_decoy)
+
+        contact_data = md.compute_contacts(combo_pdb, contacts=self.pair_list, scheme='closest')
+        is_contact = (10.*contact_data[0] < self.cutoff)[0]
+        contacts_d = self.pair_list[is_contact]
+
+        nr_d, nc_d = contacts_d.shape
+        dtype_d = {'names':['f{}'.format(i) for i in xrange(nc_d)],
+                   'formats':nc_d * [contacts_d.dtype]}
+
+        n_common = len(np.intersect1d(self.contacts_n.view(self.dtype_n), contacts_d.view(dtype_d)))
+        f_nat = float(n_common)/float(self.n_contacts_n)
+
+        return f_nat
+
+class f_nat_computer_traj:
+    def __init__(self, native, res_r, res_l, scheme='closest', cutoff=5.):
+        self.scheme = scheme
+        self.cutoff = cutoff
+        self.pair_list = np.array([(res1,res2) for res1 in res_r for res2 in res_l])
+        contact_data = md.compute_contacts(native, contacts=self.pair_list, scheme=self.scheme)
+        is_contact = (10.*contact_data[0] < self.cutoff)[0]
+        self.contacts_n = self.pair_list[is_contact].tolist()
+        self.n_contacts_n = len(self.contacts_n)
+    
+    def compute_f_nat(self, traj):
+        contact_data = md.compute_contacts(traj, contacts=self.pair_list, scheme=self.scheme)
+        is_contact = (10.*contact_data[0] < self.cutoff)
+        self.contacts_traj = [self.pair_list[frame].tolist() for frame in is_contact]
+        
+        f_nat = np.zeros(n_frames)
+        for frame in xrange(n_frames):
+            f_nat[frame] = len([pair for pair in self.contacts_traj[frame] if pair in self.contacts_n])
+        f_nat = f_nat/self.n_contacts_n
+        
+        return f_nat
+
+def seq_align_slice(ref, traj):
+    seq_ref = "".join([s for ch_seq in ref.top.to_fasta() for s in ch_seq])
+    seq_traj = "".join([s for ch_seq in traj.top.to_fasta() for s in ch_seq])
+    # alignments = pairwise2.align.globalxx(seq_ref, seq_traj)
+    alignments = pairwise2.align.globalds(seq_ref, seq_traj, blosum90, -10, -0.5, penalize_end_gaps=False) # Gap open and extend to match EMBOSS Needle 
+    aln1 = alignments[0][0]
+    aln2 = alignments[0][1]
+    
+    bb_ref = get_bb_traj(ref)
+    # print ref.n_residues, bb_ref.n_residues
+    bb_traj = get_bb_traj(traj)
+    
+    res_id1 = -1
+    res_id2 = -1
+    res_sele_n = []
+    res_sele_d = []
+    for i in xrange(len(aln1)):
+        if aln1[i] != "-":
+            res_id1 += 1
+        if aln2[i] != "-":
+            res_id2 += 1
+            
+        if ((aln1[i] != "-" and aln2[i] != "-") and
+            (ref.top.residue(res_id1).name != 'GLX' and
+             traj.top.residue(res_id2).name != 'GLX') and
+            (bb_ref.top.residue(res_id1).n_atoms == 4 and
+             bb_traj.top.residue(res_id2).n_atoms == 4)):
+                res_sele_n.append(res_id1)
+                res_sele_d.append(res_id2)
+
+    a_sele_n = []
+    a_sele_d = []
+    for res_id in res_sele_n:
+        res = ref.top.residue(res_id)
+        for a in res.atoms:
+            a_sele_n.append(a.index)
+    for res_id in res_sele_d:
+        res = traj.top.residue(res_id)
+        for a in res.atoms:
+            a_sele_d.append(a.index)
+    
+    # ref = ref.atom_slice(a_sele_n)
+    # traj = traj.atom_slice(a_sele_d)
+    
+    # # renumber residues
+    # for i, res in enumerate(ref.top.residues):
+    #     res.index = i
+    # for i, res in enumerate(traj.top.residues):
+    #     res.index = i
+
+    return a_sele_n, a_sele_d
+
+def get_bb_traj(traj, no_GLX=False):
+    sele_str = "backbone"
+    if no_GLX:
+        sele_str += " and resname != GLX"
+    bb_sele = traj.top.select(sele_str)
+    traj = traj.atom_slice(bb_sele)
+    return traj
+
+def bb_ligand_rmsd(native, decoy):
+    native = get_bb_traj(native)
+    decoy = get_bb_traj(decoy)
+    l_rmsd = 10.*np.sqrt(np.mean(np.sum(np.square(native.xyz[0] - decoy.xyz[0]), axis=1)))
+    return l_rmsd
+
+class bb_interfacial_rmsd_angstroms:
+
+    def __init__(self, native, res_group1, res_group2, cutoff_angstroms=10., verbose=False):
+        self.native = get_bb_traj(native[0])  # ensure only a single frame is passed
+
+        contact_pairs = np.array([(i,j) for i in res_group1 for j in res_group2])
+        is_contact = (10.*md.compute_contacts(self.native, contacts=contact_pairs, scheme='closest')[0]<cutoff_angstroms)[0]
+        contacts = contact_pairs[is_contact]
+                
+        interface_residues = sorted(set(contacts[:,0]).union(set(contacts[:,1])))
+        if verbose:
+            print '%i interface residues (%i,%i)' % (
+                    len(interface_residues), len(set(contacts[:,0])), len(set(contacts[:,1])))
+        self.interface_atom_indices = np.array([a.index for a in self.native.topology.atoms
+                                                   if  a.residue.index in interface_residues])
+
+    def compute_irmsd(self, traj):
+        traj = get_bb_traj(traj)
+        return 10.*md.rmsd(traj, self.native, atom_indices=self.interface_atom_indices)
 
 
 class ca_interfacial_rmsd_angstroms:
@@ -341,7 +497,7 @@ class ca_interfacial_rmsd_angstroms:
                 for g in (group1,group2)]
 
         contact_pairs = np.array([(i,j) for i in res_group1 for j in res_group2])
-        is_contact = (10.*md.compute_contacts(native,scheme='ca', contacts=contact_pairs)[0]<ca_cutoff_angstroms)[0]
+        is_contact = (10.*md.compute_contacts(native, contacts=contact_pairs, scheme='ca')[0]<ca_cutoff_angstroms)[0]
         contacts = contact_pairs[is_contact]
                 
         interface_residues = sorted(set(contacts[:,0]).union(set(contacts[:,1])))
