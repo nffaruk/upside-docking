@@ -1452,6 +1452,9 @@ def main():
     parser.add_argument('--restraint-spring-constant', default=4., type=float,
             help='Spring constant used to restrain atoms in a restraint group (default 4.) ')
 
+    parser.add_argument('--multi-restraint-spring-const', default=[], action='append', type=float,
+            help='Separate spring constants for each restraint group given by calling this flag multiple times')
+
     parser.add_argument('--offset-spring', default='',
             help='Path to text file that defines a restraint atom/residue pairs list.  The first line of the file ' +
             'should be a header containing "residue1 residue2 distance spring_constant" or '+
@@ -1810,7 +1813,11 @@ def main():
         for i,restrained_residues in enumerate(args.restraint_group):
             assert np.amax(list(restrained_residues)) < len(fasta_seq)
             highlight_residues('group_%i'%i, fasta_seq, restrained_residues)
-            make_restraint_group(i,set(restrained_residues),pos[:,:,0], args.restraint_spring_constant)
+            if not args.multi_restraint_spring_const:
+                make_restraint_group(i,set(restrained_residues),pos[:,:,0], args.restraint_spring_constant)
+            else:
+                print "spring constant:", args.multi_restraint_spring_const[i]
+                make_restraint_group(i,set(restrained_residues),pos[:,:,0], args.multi_restraint_spring_const[i])
 
     if args.offset_spring:
         print
