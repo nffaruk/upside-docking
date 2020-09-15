@@ -451,7 +451,47 @@ def seq_align_slice(ref, traj):
     # for i, res in enumerate(traj.top.residues):
     #     res.index = i
 
-    return a_sele_n, a_sele_d
+    return np.array(a_sele_n), np.array(a_sele_d)
+
+def rl_align_slice(r_pdb_b, l_pdb_b, traj, rl_chains):
+    ch_r_t = range(rl_chains[0])
+    ch_l_t = range(rl_chains[0], traj.n_chains)
+    a_r_t = np.array([a.index for chid in ch_r_t for a in traj.top.chain(chid).atoms])
+    a_l_t = np.array([a.index for chid in ch_l_t for a in traj.top.chain(chid).atoms])
+
+    r_pdb_t = traj.atom_slice(a_r_t)
+    l_pdb_t = traj.atom_slice(a_l_t)
+
+    for component in [r_pdb_t, l_pdb_t]:
+        for i, res in enumerate(component.top.residues):
+            res.index = i
+
+    a_sele_rn, a_sele_rt = seq_align_slice(r_pdb_b, r_pdb_t)
+    a_sele_ln, a_sele_lt = seq_align_slice(l_pdb_b, l_pdb_t)
+
+    a_sele_n = np.concatenate((a_sele_rn, a_sele_ln + r_pdb_b.n_atoms))
+    a_sele_t = np.concatenate((a_sele_rt, a_sele_lt + r_pdb_t.n_atoms))
+
+    return a_sele_n, a_sele_t
+
+def sele_bb(traj, a_sele):
+    a_sele = [idx for idx in a_sele if traj.top.atom(idx).name in ['N', 'CA', 'C']]
+    
+    return a_sele
+
+def get_r_sele_bb(r_pdb_b, l_pdb_b, traj, rl_chains):
+    a_sele_n, a_sele_t = rl_align_slice(r_pdb_b, l_pdb_b, traj, rl_chains)
+
+    combo_pdb_b = r_pdb_b.stack(l_pdb_b)
+
+    ch_r_n = range(r_pdb_b.n_chains)
+    a_sele_bb_n = sele_bb(combo_pdb_b, a_sele_n)
+    r_sele_bb_n = [idx for idx in a_sele_bb_n if combo_pdb_b.top.atom(idx).residue.chain.index in ch_r_n]
+
+    a_sele_bb_t = sele_bb(traj, a_sele_t)
+    r_sele_bb_t = a_sele_bb_t[:len(r_sele_bb_n)]
+
+    return r_sele_bb_n, r_sele_bb_t
 
 def get_bb_traj(traj, no_GLX=False):
     sele_str = "backbone"
