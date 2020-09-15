@@ -252,6 +252,80 @@ void JumpSampler::propose_random_move(float* delta_lprob,
 
 }
 
+// ===[Rotational Sampler Definitions]===
+
+struct RotSampler : public MonteCarloSampler {
+    struct RotChain {
+        int first_atom, next_first;
+    };
+
+    int n_rot_chains;
+    std::vector<RotChain> rot_chains;
+
+    RotSampler(const std::string& grp_name, hid_t grp, H5Logger& logger); // Constructor declaration
+
+    void propose_random_move(float* delta_lprob, 
+        RandomGenerator& random, VecArray pos) const;
+};
+
+RotSampler::RotSampler(const std::string& name, hid_t grp, H5Logger& logger): // Constructor definition
+    MonteCarloSampler(name, JUMP_MOVE_RANDOM_STREAM, logger),
+    n_rot_chains(h5::get_dset_size(2, grp, "atom_range")[0]),
+    rot_chains(n_rot_chains)
+{
+    using namespace h5;
+    check_size(grp, "atom_range",  n_rot_chains, 2);
+
+    printf("---[Adding RotSampler]---\n");
+
+    traverse_dset<2,int>(grp, "atom_range", [&](size_t ns, size_t begin_end, int x) { 
+        if(!begin_end) {
+            printf("[%d,", x);
+            rot_chains[ns].first_atom = x; }
+        else {
+            printf("%d]\n", x);
+            rot_chains[ns].next_first = x; } });
+}
+
+void RotSampler::propose_random_move(float* delta_lprob, 
+        RandomGenerator& random, VecArray pos) const {
+    Timer timer(std::string("random_rot"));
+
+    // generate random numbers for quaternion and chain selection
+    float4 rand_rot_quat = random.uniform_open_closed();
+
+    // pick a random rot chain
+    int chain = int(n_rot_chains * rand_rot_quat.w());
+    if(chain == n_rot_chains) chain--;  // this may occur due to rounding
+    const auto& j = rot_chains[chain];
+
+    // normalize quaternion and create rotation matrix for uniformly random rotation
+    rand_rot_quat /= mag(rand_rot_quat)+1e-16f;  // 1e-16 is paranoia against division by zero
+    float quat[4];
+    quat[0] = rand_rot_quat.x();
+    quat[1] = rand_rot_quat.y();
+    quat[2] = rand_rot_quat.z();
+    quat[3] = rand_rot_quat.w();
+
+    float U[9]; quat_to_rot(U, quat);
+
+    // get CoM
+    float3 com = make_vec3(0.f, 0.f, 0.f);
+    for (int na = j.first_atom; na < j.next_first; na++)
+        com += load_vec<3>(pos, na);
+    com *= 1.f/(j.next_first-j.first_atom);
+
+    // apply rotation about com
+    for (int na = j.first_atom; na < j.next_first; na++) {
+        float3 pos_na = load_vec<3>(pos, na);
+        float3 new_pos_na = com + apply_rotation(U, pos_na-com);
+        store_vec(pos, na, new_pos_na);
+    }
+    
+    *delta_lprob = 0.f;
+
+}
+
 // ===[Monte Carlo Sampler Definitions]===
 
 void MonteCarloSampler::monte_carlo_step(
@@ -305,6 +379,11 @@ MultipleMonteCarloSampler::MultipleMonteCarloSampler(hid_t sampler_group, H5Logg
 	if(h5_exists(sampler_group, (name + "_moves").c_str()))
 		samplers.emplace_back(
                         new JumpSampler(name.c_str(), open_group(sampler_group, (name + "_moves").c_str()).get(), logger));
+
+        name = "rot";
+    if(h5_exists(sampler_group, (name + "_moves").c_str()))
+        samplers.emplace_back(
+                        new RotSampler(name.c_str(), open_group(sampler_group, (name + "_moves").c_str()).get(), logger));    
 }
 
 

@@ -744,6 +744,19 @@ try {
             }
         } catch(...) {}  // stats reporting is optional
 
+        try {
+            if(mc_interval) {
+                if(verbose)printf("rot_success:\n");
+                for(auto& sys: systems) {
+                    std::vector<int64_t> ps(2,0);
+                    traverse_dset<2,int>(sys.config.get(), "/output/rot_stats", [&](size_t nf, int d, int x) {
+                            ps[d] += x;});
+                    if(verbose)printf(" % .4f", double(ps[0])/double(ps[1]));
+                }
+                if(verbose)printf("\n");
+            }
+        } catch(...) {}  // stats reporting is optional
+
 #ifdef COLLECT_PROFILE
         if(verbose) {
             printf("\n");
