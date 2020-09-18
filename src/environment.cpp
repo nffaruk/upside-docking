@@ -566,6 +566,26 @@ struct NonlinearCoupling : public PotentialNode {
         for( int i : range(csize)) coeff[i] = params[i];
         for(int aa: range(wsize)) weights[aa] = params[csize+aa];
     }
+
+    virtual vector<float> get_value_by_name(const char* log_name) override {
+        if(!strcmp(log_name, "res_specific")) {
+            vector<float> res_specific(n_res);
+            for(int nr: range(n_res)) {
+                wnumber[nr] = 0.0;
+                int ctype = coupling_types[nr];
+                for(int aa: range(n_restype)) 
+                    wnumber[nr] += weights[ctype*n_restype+aa] * input.output(0, nr*n_restype+aa);
+
+                auto coord = (wnumber[nr]-spline_offset)*spline_inv_dx;
+                auto v = clamped_deBoor_value_and_deriv(coeff.data() + ctype*n_coeff, coord, n_coeff);
+                res_specific[nr] = v[0];
+            }
+
+            return res_specific;
+        } else {
+            throw string("Value ") + log_name + string(" not implemented");
+        }
+    }  
 };
 static RegisterNodeType<NonlinearCoupling,1> nonlinear_coupling_node("nonlinear_coupling");
 
