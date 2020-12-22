@@ -164,7 +164,8 @@ def main():
                     if i: unexpected_chain_breaks = True
 
                     if args.record_chain_breaks: chain_first_residue.append(len(coords)/3)
-                    if i and args.rl_chains:
+                    # if only one chain due to PDB error, assume user supplied rl_chains has intended correct counts
+                    if i and args.rl_chains and len(chains) > 1:
                         if ch_num < rl_chains_actual[0]:
                             rl_chains[0] += 1
                         else:
