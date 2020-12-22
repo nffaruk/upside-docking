@@ -390,6 +390,7 @@ class f_nat_computer_traj:
         self.n_contacts_n = len(self.contacts_n)
     
     def compute_f_nat(self, traj):
+        n_frames = traj.n_frames
         contact_data = md.compute_contacts(traj, contacts=self.pair_list, scheme=self.scheme)
         is_contact = (10.*contact_data[0] < self.cutoff)
         self.contacts_traj = [self.pair_list[frame].tolist() for frame in is_contact]
