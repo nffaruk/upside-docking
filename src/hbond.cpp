@@ -284,6 +284,54 @@ namespace {
 
         static bool is_compatible(const float* p1, const float* p2) {return true;};
     };
+
+    struct InterHBCoverageIntrxn {
+        // radius scale angular_width angular_scale
+        // first group is hb; second group is sc
+
+        constexpr static bool  symmetric = false;
+        constexpr static int   n_knot = N_KNOT_SC_BB, n_knot_angular=N_KNOT_ANGULAR;
+        constexpr static int   n_param=2*n_knot_angular+2*n_knot, n_dim1=7, n_dim2=6, simd_width=1;
+        constexpr static float inv_dx = 1.f/KNOT_SPACING, inv_dtheta = (n_knot_angular-3)/2.f;
+
+        static float cutoff(const float* p) {
+            return (n_knot-2-1e-6)/inv_dx;  // 1e-6 insulates from roundoff
+        }
+
+        static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
+            // Only interactions accross receptor and ligand residues
+            // return Int4() == Int4();  // No exclusions (all true)
+            return (id1 != id2) & ((l_start == i4_zero) |
+                                           ((id1 < l_start) & ((l_start-i4_one) < id2)) |
+                                           (((l_start-i4_one) < id1) & (id2 < l_start)));
+        }
+
+        static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
+                const Vec<n_dim1,Float4> &hb_pos, const Vec<n_dim2,Float4> &sc_pos) {
+            Float4 one(1.f);
+
+            // print_vector("hb_pos[0]", hb_pos[0]);
+            // print_vector("sc_pos[0]", sc_pos[0]);
+            // print_vector("hbond_dist", mag(extract<0,3>(hb_pos)-extract<0,3>(sc_pos)));
+            auto coverage = quadspline<n_knot_angular, n_knot>(d1,d2, inv_dtheta,inv_dx,p, hb_pos,sc_pos);
+
+            auto prefactor = sqr(one-hb_pos[6]);
+            d1 *= prefactor;
+            d2 *= prefactor;
+            d1[6] = -coverage * (one-hb_pos[6])*Float4(2.f);
+
+            return prefactor * coverage;
+        }
+
+        static void param_deriv(Vec<n_param> &d_param, const float* p,
+                const Vec<n_dim1> &hb_pos, const Vec<n_dim2> &sc_pos) {
+            quadspline_param_deriv<n_knot_angular, n_knot>(d_param, inv_dtheta,inv_dx,p, hb_pos,sc_pos);
+            auto prefactor = sqr(1.f-hb_pos[6]);
+            d_param *= prefactor;
+        }
+
+        static bool is_compatible(const float* p1, const float* p2) {return true;};
+    };
 }
 
 
@@ -412,6 +460,52 @@ struct HBondCoverage : public CoordNode {
     }
 };
 static RegisterNodeType<HBondCoverage,2> coverage_node("hbond_coverage");
+
+struct InterHBondCoverage : public CoordNode {
+    // For interactions accross receptor and ligand residues
+    InteractionGraph<InterHBCoverageIntrxn> igraph;
+    int n_sc;
+
+    InterHBondCoverage(hid_t grp, CoordNode& infer_, CoordNode& sidechains_):
+        CoordNode(get_dset_size(1,grp,"index2")[0], 1),
+        igraph(grp, &infer_, &sidechains_),
+        n_sc(igraph.n_elem2) {}
+
+    virtual void compute_value(ComputeMode mode) override {
+        Timer timer(string("hbond_coverage"));
+
+        // Compute coverage and its derivative
+        igraph.compute_edges();
+
+        fill(output, 0.f);
+        for(int ne=0; ne<igraph.n_edge; ++ne) {
+            output(0, igraph.edge_indices2[ne]) += igraph.edge_value[ne];
+        }
+    }
+
+    virtual void propagate_deriv() override {
+        Timer timer(string("hbond_coverage_deriv"));
+
+        for(int ne: range(igraph.n_edge))
+            igraph.edge_sensitivity[ne] = sens(0,igraph.edge_indices2[ne]);
+        igraph.propagate_derivatives();
+    }
+
+    virtual std::vector<float> get_param() const override {return igraph.get_param();}
+#ifdef PARAM_DERIV
+    virtual std::vector<float> get_param_deriv() override {return igraph.get_param_deriv();}
+#endif
+    virtual void set_param(const std::vector<float>& new_param) override {igraph.set_param(new_param);}
+
+    virtual vector<float> get_value_by_name(const char* log_name) override {
+        if(!strcmp(log_name, "count_edges_by_type")) {
+            return igraph.count_edges_by_type();
+        } else {
+            throw string("Value ") + log_name + string(" not implemented");
+        }
+    }
+};
+static RegisterNodeType<InterHBondCoverage,2> inter_coverage_node("inter_hbond_coverage");
 
 
 struct HBondEnergy : public HBondCounter
