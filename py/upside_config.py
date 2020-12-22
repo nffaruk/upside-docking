@@ -1551,7 +1551,8 @@ def main():
     if args.initial_structure:
         pos[:,:,0] = init_pos[...,0]
     else:
-        pos[:,:,0] = random_initial_config(len(fasta_seq))
+        rand_pos = random_initial_config(len(fasta_seq))
+        pos[:,:,0] = rand_pos - rand_pos.mean(axis=0)
     create_array(input, 'pos', obj=pos)
 
     potential = t.create_group(input,  'potential')
