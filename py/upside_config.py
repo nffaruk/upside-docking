@@ -20,9 +20,8 @@ deg=np.deg2rad(1)
 
 default_filter = tb.Filters(complib='zlib', complevel=5, fletcher32=True)
 n_bit_rotamer = 4
-n_bit_resid = (5000).bit_length() # Take care not excede maximum value of int for rotamer id bitfield
+n_bit_rlid = (1).bit_length() # Take care not excede maximum value of int for rotamer id bitfield
 # ToDo: change type of all id variables in interaction_graph.h to uint32_t to accomodate a larger residue limit
-# ToDo: instead change field to chainid
 
 def highlight_residues(name, fasta, residues_to_highlight):
     fasta_one_letter = [one_letter_aa[x] for x in fasta]
@@ -987,7 +986,7 @@ def write_sidechain_radial(fasta, library, excluded_residues, suffix=''):
         create_array(g, 'interaction_param', obj=params.root.interaction_param[:])
 
 
-def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic_1body, fix_rotamer):
+def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic_1body, fix_rotamer, rlid_arr):
     def compute_chi1_state(angles):
         chi1_state = np.ones(angles.shape, dtype='i')
         chi1_state[(   0.*deg<=angles)&(angles<120.*deg)] = 0
@@ -1082,26 +1081,27 @@ def write_rotamer_placement(fasta, placement_library, dynamic_placement, dynamic
         base_id = (count_by_n_rot[n_rot]<<n_bit_rotamer) + n_rot
         count_by_n_rot[n_rot] += 1
 
+        rlid = rlid_arr[rnum]
         rama_residue  .extend([rnum]*(stop-start))
         affine_residue.extend([rnum]*(stop-start))
         layer_index   .extend(np.arange(start,stop))
         beadtype_seq  .extend(['%s_%i'%(aa,i) for i in range(n_bead)]*n_rot)
         id_seq_rot = np.arange(stop-start)//n_bead + (base_id<<n_bit_rotamer) # bitfield w/rotamer info
-        id_seq_rnum = np.array([((k<<n_bit_resid) + rnum) for k in id_seq_rot]) # shift bitfield to make room for resid
+        id_seq_rnum = np.array([((k<<n_bit_rlid) + rlid) for k in id_seq_rot]) # shift bitfield to make room for rlid
         id_seq        .extend(id_seq_rnum)
 
         if np.any(id_seq_rnum > 2147483647):
-            raise ValueError('A rotamer id has exceeded the maximum C++ int32 size. See comments for variable n_bit_resid.')
+            raise ValueError('A rotamer id has exceeded the maximum C++ int32 size. See comments for variable n_bit_rlid.')
 
         ## bitfield debugging
         # print ("start:", start, "stop:", stop, "n_bead", n_bead, "base_id:", base_id, "n_rot:", n_rot, "count_by_n_rot[n_rot]:", count_by_n_rot[n_rot],
         #        np.arange(stop-start)//n_bead, base_id<<n_bit_rotamer)
         # id_q = id_seq_rnum[0]
-        # selector = (1 << n_bit_resid) - 1
+        # selector = (1 << n_bit_rlid) - 1
         # print "selector:", selector
-        # resid = id_q & selector
-        # print "id_q:", id_q, "resid:", resid, "rnum:", rnum
-        # id_q >>= n_bit_resid
+        # rlid = id_q & selector
+        # print "id_q:", id_q, "rlid:", rlid, "rnum:", rnum
+        # id_q >>= n_bit_rlid
         # id_q = id_seq_rot[0]
         # selector = (1 << n_bit_rotamer) - 1
         # print "selector:", selector
@@ -1522,10 +1522,6 @@ def main():
 
     global n_atom, t, potential
     n_res = len(fasta_seq)
-    if n_res > 2**n_bit_resid:
-        raise ValueError("Number of residues cannot exceede %d. The real limit is a few times lower than this "
-                         "due to the other elements in the rotamer id bitfield. See variable n_bit_resid and "
-                         "write_rotamer_placement() in this script." % 2**n_bit_resid)
     n_atom = 3*n_res
 
     t = tb.open_file(args.output,'w')
@@ -1562,15 +1558,7 @@ def main():
         write_angle_spring(args)
         write_dihedral_spring(fasta_seq_with_cpr)
 
-    sc_node_name = ''
-    if args.rotamer_placement:
-        require_rama = True
-        require_affine = True
-        sc_node_name, pl_node_name = write_rotamer_placement(
-                fasta_seq, args.rotamer_placement,
-                args.dynamic_rotamer_placement, args.dynamic_rotamer_1body,
-                args.fix_rotamer)
-
+    rlid_arr = np.zeros(n_res, dtype="int32")
     if args.chain_break_from_file:
         try:
             with open(args.chain_break_from_file) as infile:
@@ -1611,6 +1599,19 @@ def main():
             print
             print "hbond_exclude_residues"
             print args.hbond_exclude_residues
+
+            l_start = chain_first_residue[rl_chains[0]-1]
+            rlid_arr[l_start:] = 1
+
+
+    sc_node_name = ''
+    if args.rotamer_placement:
+        require_rama = True
+        require_affine = True
+        sc_node_name, pl_node_name = write_rotamer_placement(
+                fasta_seq, args.rotamer_placement,
+                args.dynamic_rotamer_placement, args.dynamic_rotamer_1body,
+                args.fix_rotamer, rlid_arr)
 
     if args.hbond_energy:
         write_infer_H_O  (fasta_seq, args.hbond_exclude_residues)

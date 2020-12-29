@@ -563,7 +563,7 @@ array<int,UPPER_ROT> calculate_n_elem(InteractionGraph<BT> &igraph) {
 
     unordered_map<unsigned,set<unsigned>> unique_ids;
     for(int ne: range(igraph.n_elem1)) {
-        unsigned id = igraph.id1[ne] >> n_bit_resid;
+        unsigned id = igraph.id1[ne] >> n_bit_rlid;
         unsigned selector = (1u<<n_bit_rotamer) - 1u;
         unsigned   rot = id & selector; id >>= n_bit_rotamer;
         unsigned n_rot = id & selector; id >>= n_bit_rotamer;
@@ -811,7 +811,7 @@ struct RotamerSidechain: public PotentialNode {
         }
 
         for(int n: range(igraph.n_elem1)) {
-            unsigned id = igraph.id1[n] >> n_bit_resid;
+            unsigned id = igraph.id1[n] >> n_bit_rlid;
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
@@ -832,8 +832,8 @@ struct RotamerSidechain: public PotentialNode {
 
         const unsigned selector = (1u<<n_bit_rotamer) - 1u;
         for(int ne=0; ne<igraph.n_edge; ++ne) {
-            int   id1  = igraph.edge_id1[ne] >> n_bit_resid;
-            int   id2  = igraph.edge_id2[ne] >> n_bit_resid;
+            int   id1  = igraph.edge_id1[ne] >> n_bit_rlid;
+            int   id2  = igraph.edge_id2[ne] >> n_bit_rlid;
             float prob = expf(-igraph.edge_value[ne]);  // value of edge is potential
 
             if((id1&(selector<<n_bit_rotamer)) > (id2&(selector<<n_bit_rotamer))) swap(id1,id2);
@@ -910,7 +910,7 @@ struct RotamerSidechain: public PotentialNode {
 
         VecArray energy_1body = prob_nodes[prob_node_index]->output;
         for(int n: range(igraph.n_elem1)) {
-            unsigned id = igraph.id1[n] >> n_bit_resid;
+            unsigned id = igraph.id1[n] >> n_bit_rlid;
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;
@@ -934,7 +934,7 @@ struct RotamerSidechain: public PotentialNode {
         set<unsigned> known_ids;
 
         for(int ne: range(igraph.n_elem1)) {
-            unsigned id = igraph.id1[ne] >> n_bit_resid;
+            unsigned id = igraph.id1[ne] >> n_bit_rlid;
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             if(id&selector) continue; // only count on the 0th rotamer
             if(known_ids.find(id)!=known_ids.end()) continue; //may be multiple beads
@@ -973,7 +973,7 @@ struct RotamerSidechain: public PotentialNode {
             sens_1body.emplace_back(prob_nodes[i]->sens);
 
         for(int n: range(igraph.n_elem1)) {
-            unsigned id = igraph.id1[n] >> n_bit_resid;
+            unsigned id = igraph.id1[n] >> n_bit_rlid;
             unsigned selector = (1u<<n_bit_rotamer) - 1u;
             unsigned rot      = id & selector; id >>= n_bit_rotamer;
             unsigned n_rot    = id & selector; id >>= n_bit_rotamer;

@@ -129,8 +129,8 @@ namespace {
         }
 
     constexpr static const int n_bit_rotamer = 4; // max number of rotamers is 2**n_bit_rotamer
-    constexpr static const int n_bit_resid = 13; // max number of residues is 2**n_bit_resid
-    static const auto i4_resid_sele = Int4((1u<<n_bit_resid) - 1u);
+    constexpr static const int n_bit_rlid = 1;
+    static const auto i4_rlid_sele = Int4((1u<<n_bit_rlid) - 1u);
     static const auto i4_zero = Int4(0);
     static const auto i4_one = Int4(1);
 
@@ -155,7 +155,7 @@ namespace {
         }
 
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
-            return (id1 & i4_resid_sele) != (id2 & i4_resid_sele);
+            return id1.srl(n_bit_rlid+n_bit_rotamer) != id2.srl(n_bit_rlid+n_bit_rotamer);
         }
 
         static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
@@ -197,7 +197,7 @@ namespace {
         }
 
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
-            return (id1 & i4_resid_sele) != (id2 & i4_resid_sele); //(id1.srl(n_bit_resid)).srl(n_bit_rotamer) != (id2.srl(n_bit_resid)).srl(n_bit_rotamer);
+            return id1.srl(n_bit_rlid+n_bit_rotamer) != id2.srl(n_bit_rlid+n_bit_rotamer);
         }
 
         static Float4 compute_edge(Vec<n_dim1,Float4> &d1, Vec<n_dim2,Float4> &d2, const float* p[4],
@@ -237,8 +237,10 @@ namespace {
         }
 
         static Int4 acceptable_id_pair(const Int4& id1, const Int4& id2, const Int4& l_start) {
-            auto id1_res = id1 & i4_resid_sele;
-            auto id2_res = id2 & i4_resid_sele;
+            auto id1_rlid = id1 & i4_rlid_sele;
+            auto id2_rlid = id2 & i4_rlid_sele;
+            auto id1_res = id1.srl(n_bit_rlid+n_bit_rotamer);
+            auto id2_res = id2.srl(n_bit_rlid+n_bit_rotamer);
 
             // Debugging
             // Int4 first_term = (id1_res != id2_res);
@@ -257,9 +259,7 @@ namespace {
             // printf("fourth: (%i,%i,%i,%i)\n", fourth_term.x(), fourth_term.y(), fourth_term.z(), fourth_term.w());
             // printf("combo: (%i,%i,%i,%i)\n", combo_term.x(), combo_term.y(), combo_term.z(), combo_term.w());
 
-            return (id1_res != id2_res) & ((l_start == i4_zero) |
-                                           ((id1_res < l_start) & ((l_start-i4_one) < id2_res)) |
-                                           (((l_start-i4_one) < id1_res) & (id2_res < l_start)));
+            return (id1_res != id2_res) & ((l_start == i4_zero) | (id1_rlid != id2_rlid));
 
             // return Int4(0) == Int4(1);
         }
