@@ -33,7 +33,7 @@ def _output_groups(t):
         yield t.get_node('/output')
         i += 1
 
-def traj_from_upside(seq, time, pos, chain_first_residue=[0]):
+def traj_from_upside(seq, time, pos, chain_first_residue, chain_counts):
     H_bond_length = 0.88
     O_bond_length = 1.24
 
@@ -41,6 +41,7 @@ def traj_from_upside(seq, time, pos, chain_first_residue=[0]):
     n_res = len(seq)
     seq = np.array([('PRO' if x == 'CPR' else x) for x in seq])
 
+    ch_first = chain_first_residue[:]
     chain_first_residue = set(chain_first_residue).union(set([0,n_res]))
     assert all(x<=n_res for x in chain_first_residue)
     assert 0 in chain_first_residue
@@ -58,54 +59,71 @@ def traj_from_upside(seq, time, pos, chain_first_residue=[0]):
     last_C_atom = None  # needed for adding bonds
     atom_num = 0
 
-    for nr in range(n_res):
-        if nr in chain_first_residue:
-            current_chain = topo.add_chain()
+    for ch_real, memb_count in enumerate(chain_counts):
+        current_chain = topo.add_chain()
 
-        res = topo.add_residue(seq[nr], current_chain, resSeq=nr)
-        atoms.append(topo.add_atom('N', el.nitrogen, res, atom_num)); atom_num+=1; N =atoms[-1]
-        atoms.append(topo.add_atom('CA',el.carbon,   res, atom_num)); atom_num+=1; CA=atoms[-1]
-        atoms.append(topo.add_atom('C', el.carbon,   res, atom_num)); atom_num+=1; C =atoms[-1]
+        culm_idx = sum(chain_counts[:ch_real+1])
+        culm_idx_prev = sum(chain_counts[:ch_real])
 
-        expanded_pos_columns.append(pos[:,3*nr:3*(nr+1)])
-        N_pos  = expanded_pos_columns[-1][:,0]
-        CA_pos = expanded_pos_columns[-1][:,1]
-        C_pos  = expanded_pos_columns[-1][:,2]
+        res_min = ch_first[culm_idx_prev]
 
-        if nr not in chain_first_residue:
-            topo.add_bond(last_C,N)
-        topo.add_bond(N ,CA)
-        topo.add_bond(CA,C)
+        if culm_idx < len(ch_first): 
+            res_upper = ch_first[culm_idx]
+        else:
+            res_upper = n_res
 
-        # Add NH
-        if nr not in chain_first_residue and seq[nr] != 'PRO':
-            atoms.append(topo.add_atom('NH', el.hydrogen, res, atom_num)); atom_num+=1; H =atoms[-1]
-            topo.add_bond(N,H)
+        for nr in range(res_min, res_upper):
+            # if nr in chain_first_residue:
+            #     current_chain = topo.add_chain()
 
-            last_C_pos = pos[:,3*nr-1]
-            H_pos = N_pos - H_bond_length*vhat(vhat(last_C_pos-N_pos) + vhat(CA_pos-N_pos))
-            expanded_pos_columns.append(H_pos[:,None].astype('f4'))
+            res = topo.add_residue(seq[nr], current_chain, resSeq=nr)
+            atoms.append(topo.add_atom('N', el.nitrogen, res, atom_num)); atom_num+=1; N =atoms[-1]
+            atoms.append(topo.add_atom('CA',el.carbon,   res, atom_num)); atom_num+=1; CA=atoms[-1]
+            atoms.append(topo.add_atom('C', el.carbon,   res, atom_num)); atom_num+=1; C =atoms[-1]
 
-        # Add CB
-        if seq[nr] != 'GLY':
-            atoms.append(topo.add_atom('CB', el.carbon, res, atom_num)); atom_num+=1; CB=atoms[-1]
-            topo.add_bond(CA,CB)
+            expanded_pos_columns.append(pos[:,3*nr:3*(nr+1)])
+            N_pos  = expanded_pos_columns[-1][:,0]
+            CA_pos = expanded_pos_columns[-1][:,1]
+            C_pos  = expanded_pos_columns[-1][:,2]
 
-            extend_dir = vhat(vhat(CA_pos-N_pos)+vhat(CA_pos-C_pos))
-            cross_dir  = np.cross(N_pos-CA_pos, C_pos-CA_pos)
-            CB_pos = CA_pos + 0.94375626*extend_dir + 0.5796686718421049*cross_dir
-            expanded_pos_columns.append(CB_pos[:,None].astype('f4'))
+            if nr not in chain_first_residue:
+                topo.add_bond(last_C,N)
+            topo.add_bond(N ,CA)
+            topo.add_bond(CA,C)
 
-        # Add O
-        if nr+1 not in chain_first_residue:
+            # Add NH
+            if nr not in chain_first_residue and seq[nr] != 'PRO':
+                atoms.append(topo.add_atom('NH', el.hydrogen, res, atom_num)); atom_num+=1; H =atoms[-1]
+                topo.add_bond(N,H)
+
+                last_C_pos = pos[:,3*nr-1]
+                H_pos = N_pos - H_bond_length*vhat(vhat(last_C_pos-N_pos) + vhat(CA_pos-N_pos))
+                expanded_pos_columns.append(H_pos[:,None].astype('f4'))
+
+            # Add CB
+            if seq[nr] != 'GLY':
+                atoms.append(topo.add_atom('CB', el.carbon, res, atom_num)); atom_num+=1; CB=atoms[-1]
+                topo.add_bond(CA,CB)
+
+                extend_dir = vhat(vhat(CA_pos-N_pos)+vhat(CA_pos-C_pos))
+                cross_dir  = np.cross(N_pos-CA_pos, C_pos-CA_pos)
+                CB_pos = CA_pos + 0.94375626*extend_dir + 0.5796686718421049*cross_dir
+                expanded_pos_columns.append(CB_pos[:,None].astype('f4'))
+
+            # Add O
             atoms.append(topo.add_atom('O', el.oxygen, res, atom_num)); atom_num+=1; O =atoms[-1]
             topo.add_bond(C,O)
 
-            next_N_pos = pos[:,3*nr+3]
-            O_pos = C_pos - O_bond_length*vhat(vhat(CA_pos-C_pos) + vhat(next_N_pos-C_pos))
+            if nr+1 not in chain_first_residue:
+                next_N_pos = pos[:,3*nr+3]
+                O_pos = C_pos - O_bond_length*vhat(vhat(CA_pos-C_pos) + vhat(next_N_pos-C_pos))
+            else:
+                # Hacky placement not seriously considering sterics and angle
+                O_pos = C_pos - O_bond_length*vhat(vhat(CA_pos-C_pos) + vhat(CA_pos-N_pos))
+
             expanded_pos_columns.append(O_pos[:,None].astype('f4'))
 
-        last_C = C
+            last_C = C
     xyz = np.concatenate(expanded_pos_columns,axis=1)
 
     # There is some weird bug related to the indices of the topology object.  Basically, the 
@@ -133,6 +151,7 @@ def load_upside_traj(fname, stride=1, external_pos=[], from_init=False, fasta_fn
     time = []
     # Check for chain breaks in config file
     chain_first_residue = np.array([0], dtype='int32')
+    chain_counts = np.array([1], dtype='int32')
 
     if from_init:
         with open(fname, 'rb') as f:
@@ -147,6 +166,7 @@ def load_upside_traj(fname, stride=1, external_pos=[], from_init=False, fasta_fn
             with open(chain_breaks_fn) as f:
                 chain_first_residue = np.append(chain_first_residue,
                                                 np.array([int(i) for i in f.readline().split()]))
+                chain_counts = np.array([int(i) for i in f.readline().split()]) 
     else:
         with tb.open_file(fname) as t:
             if target_pos_only:
@@ -168,6 +188,7 @@ def load_upside_traj(fname, stride=1, external_pos=[], from_init=False, fasta_fn
 
             if 'chain_break' in t.root.input:
                 chain_first_residue = np.append(chain_first_residue, t.root.input.chain_break.chain_first_residue[:])
+                chain_counts = t.root.input.chain_break.chain_counts[:]
     
     if len(external_pos) > 0:
         if from_init or target_pos_only or initial_pos_only:
@@ -183,7 +204,7 @@ def load_upside_traj(fname, stride=1, external_pos=[], from_init=False, fasta_fn
         xyz = np.concatenate(xyz,axis=0)
     time = np.concatenate(time,axis=0)
 
-    return traj_from_upside(seq, time, xyz, chain_first_residue=chain_first_residue)
+    return traj_from_upside(seq, time, xyz, chain_first_residue, chain_counts)
 
 def load_upside_data(fname, output_names):
     pass
@@ -216,8 +237,10 @@ def load_upside_rep(fnames, rep_select, stride=1):
 
                 # Check for chain breaks in config file
                 chain_first_residue = np.array([0], dtype='int32')
+                chain_counts = np.array([1], dtype='int32')
                 if 'chain_break' in t.root.input:
                     chain_first_residue = np.append(chain_first_residue, t.root.input.chain_break.chain_first_residue[:])
+                    chain_counts = t.root.input.chain_break.chain_counts[:]
         else:
             with tb.open_file(fn) as t:
                 start_frame = 0

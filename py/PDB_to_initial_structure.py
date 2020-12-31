@@ -141,9 +141,11 @@ def main():
     unexpected_chain_breaks = False
     chain_resnum = []
     chain_first_residue = []
+    chain_counts = [] # Keep track of unexpected broken chain membership to actual chains
 
     for ch_num, (chain_id, (res,ignored_restype)) in enumerate(chains):
         print "chain %s:" % chain_id
+        chain_counts.append(1)
 
         # only look at residues with complete backbones
         res = [r for r in res if np.all(np.isfinite(np.array((r.N,r.CA,r.C))))]
@@ -161,7 +163,9 @@ def main():
                 if dist > 2. or not i: # catch new chain anyway
                     print '    %s chain break at residue %i (%4.1f A)' % (('UNEXPECTED' if i else 'expected  '),
                          len(coords)/3, dist)
-                    if i: unexpected_chain_breaks = True
+                    if i:
+                        unexpected_chain_breaks = True
+                        chain_counts[ch_num] += 1
 
                     if args.record_chain_breaks: chain_first_residue.append(len(coords)/3)
                     # if only one chain due to PDB error, assume user supplied rl_chains has intended correct counts
@@ -219,7 +223,11 @@ def main():
     if chain_first_residue:
         with open(args.basename+'.chain_breaks','w') as f:
             print >>f, ' '.join([str(i) for i in chain_first_residue])
-            if args.rl_chains: print >>f, '%d %d' % (rl_chains[0], rl_chains[1])
+            print >>f, ' '.join([str(i) for i in chain_counts])
+
+            if args.rl_chains:
+                print >>f, '%d %d' % (rl_chains_actual[0], rl_chains_actual[1])
+                print >>f, '%d %d' % (rl_chains[0], rl_chains[1])
 
 if __name__ == '__main__':
     main()
