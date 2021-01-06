@@ -55,6 +55,7 @@ def main():
     parser.add_argument('--jump-rotation-scale', type=float, default=30., help='Rotational gaussian width in degrees for Monte Carlo JumpSampler. Default: 30 degrees')
     parser.add_argument('--remove-pivot', action='store_true', help='Whether to remove the MC PivotSampler param group to isolate JumpSampler for testing')
     parser.add_argument('--no-jump', action='store_true', help='Whether to skip creating MC JumpSampler param group and prevent jumps')
+    parser.add_argument('--ignore-weird-rama', action='store_true', help='Do not halt on detection of weird rama for slice')
     args = parser.parse_args()
 
     if args.rl_chains and not (args.chain_first_residue or chain_break_from_file):
@@ -150,8 +151,11 @@ def main():
             ids = tbl[loc]
             assert ids.shape == (5,)
             chain_num = (ids[:,None]>=chain_starts).sum(axis=-1)
-            if not (chain_num[1] == chain_num[2] == chain_num[3] and (chain_num[0]==chain_num[1] or chain_num[3]==chain_num[4])): 
+            if not (chain_num[1] == chain_num[2] == chain_num[3] and (chain_num[0]==chain_num[1] or chain_num[3]==chain_num[4])):
+                if not args.ignore_weird_rama: 
                     raise ValueError("Weird rama_coord %i, unable to proceed" % loc)
+                else:
+                    print "WARNING: ignoring weird rama_coord. Not understood effects of doing this."
 
             if chain_num[0]==chain_num[1]: 
                 tbl[loc,4] = -1  # cut psi
