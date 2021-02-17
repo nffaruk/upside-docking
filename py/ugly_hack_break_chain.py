@@ -40,6 +40,10 @@ def unsupported(pot, grp_name):
         print '!!!!!!!!   Error: %s is not supported   !!!!!!!!' % grp_name
         print
 
+default_filter = tb.Filters(complib='zlib', complevel=5, fletcher32=True)
+def create_array(t, grp, nm, obj=None):
+    return t.create_earray(grp, nm, obj=obj, filters=default_filter)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -56,10 +60,14 @@ def main():
     parser.add_argument('--remove-pivot', action='store_true', help='Whether to remove the MC PivotSampler param group to isolate JumpSampler for testing')
     parser.add_argument('--no-jump', action='store_true', help='Whether to skip creating MC JumpSampler param group and prevent jumps')
     parser.add_argument('--ignore-weird-rama', action='store_true', help='Do not halt on detection of weird rama for slice')
+    parser.add_argument('--tether-fragments', action='store_true', help='Whether to add a restraint between C and N of improper breaks')
     args = parser.parse_args()
 
     if args.rl_chains and not (args.chain_first_residue or chain_break_from_file):
         parser.error('must specify either --chain-first-residue or --chain-break-from-file to use --rl-chains')
+
+    if args.tether_fragments and not args.chain_break_from_file:
+        parser.error('--tether-fragments requires --chain-break-from-file')
 
     t = tb.open_file(args.config, 'a')
     if len(args.chain_first_residue) > 1:
@@ -161,7 +169,54 @@ def main():
                 tbl[loc,4] = -1  # cut psi
             else: 
                 tbl[loc,0] = -1  # cut phi
+
+    if args.tether_fragments:
+        ch_first_res = t.root.input.chain_break.chain_first_residue[:]
+        chain_counts = t.root.input.chain_break.chain_counts[:] 
+
+        imp_break_pairs = []
+        ch_imp = 0
+        for ch_real, memb_count in enumerate(chain_counts):
+            if memb_count > 1:
+                for ch in xrange(memb_count-1):
+                    imp_idx = ch_imp + ch
+                    print imp_idx
+                    res_after = ch_first_res[imp_idx]
+                    atom_after = res_after*3
+                    atom_before = atom_after - 1
+                    imp_break_pairs.append([atom_before, atom_after])
+            ch_imp += memb_count
+        imp_break_pairs = np.array(imp_break_pairs)
+        n_restraints = len(imp_break_pairs)
+        print "Adding springs between improper break atoms:", imp_break_pairs
+
+        xyz = t.root.input.pos[:,:,0]
+        pair_dists = []
+        for pair in imp_break_pairs:
+            pair_dists.append(xyz[pair[1]] - xyz[pair[0]])
+        pair_dists = np.linalg.norm(pair_dists, axis=1)
+
+        pair_spring_consts = np.full(n_restraints, 48.)
+
+        grp = t.root.input.potential.dist_spring
+
+        idx = grp.id[:]
+        equil_dist = grp.equil_dist[:]
+        spring_const = grp.spring_const[:]
+        bonded_atoms = grp.bonded_atoms[:]
+
+        grp.id._f_remove()
+        grp.equil_dist._f_remove()
+        grp.spring_const._f_remove()
+        grp.bonded_atoms._f_remove()
+
+        create_array(t, grp, 'id',           obj=np.concatenate((idx,          imp_break_pairs), axis=0))
+        create_array(t, grp, 'equil_dist',   obj=np.concatenate((equil_dist,   pair_dists), axis=0))
+        create_array(t, grp, 'spring_const', obj=np.concatenate((spring_const, pair_spring_consts), axis=0))
+        create_array(t, grp, 'bonded_atoms', obj=np.concatenate((bonded_atoms, np.zeros(n_restraints, dtype='int')), axis=0))
+
     t.close()
+
 
 if __name__ == '__main__':
     main()
