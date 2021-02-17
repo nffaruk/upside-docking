@@ -493,6 +493,8 @@ def rl_align_slice(r_pdb_b, l_pdb_b, traj, rl_chains):
     a_sele_rn, a_sele_rt = seq_align_slice(r_pdb_b, r_pdb_t)
     a_sele_ln, a_sele_lt = seq_align_slice(l_pdb_b, l_pdb_t)
 
+    # TODO: return updated rl_chains_ref, rl_chains_traj incase chains dropped after slice
+
     a_sele_n = np.concatenate((a_sele_rn, a_sele_ln + r_pdb_b.n_atoms))
     a_sele_t = np.concatenate((a_sele_rt, a_sele_lt + r_pdb_t.n_atoms))
 
@@ -503,19 +505,25 @@ def sele_bb(traj, a_sele):
     
     return a_sele
 
-def get_r_sele_bb(r_pdb_b, l_pdb_b, traj, rl_chains):
-    a_sele_n, a_sele_t = rl_align_slice(r_pdb_b, l_pdb_b, traj, rl_chains)
+def get_r_sele_bb(r_pdb_ref, l_pdb_ref, traj, rl_chains, get_l=False):
+    a_sele_n, a_sele_t = rl_align_slice(r_pdb_ref, l_pdb_ref, traj, rl_chains)
 
-    combo_pdb_b = r_pdb_b.stack(l_pdb_b)
+    combo_pdb_ref = r_pdb_ref.stack(l_pdb_ref)
 
-    ch_r_n = range(r_pdb_b.n_chains)
-    a_sele_bb_n = sele_bb(combo_pdb_b, a_sele_n)
-    r_sele_bb_n = [idx for idx in a_sele_bb_n if combo_pdb_b.top.atom(idx).residue.chain.index in ch_r_n]
+    if not get_l:
+        # Receptor
+        ch_x_n = range(r_pdb_ref.n_chains)
+    else:
+        # Ligand
+        ch_x_n = range(r_pdb_ref.n_chains, combo_pdb_ref.n_chains)
+    a_sele_bb_n = sele_bb(combo_pdb_ref, a_sele_n)
+    r_sele_bb_n = [idx for idx in a_sele_bb_n if combo_pdb_ref.top.atom(idx).residue.chain.index in ch_x_n]
 
     a_sele_bb_t = sele_bb(traj, a_sele_t)
     r_sele_bb_t = a_sele_bb_t[:len(r_sele_bb_n)]
 
     return r_sele_bb_n, r_sele_bb_t
+
 
 def get_bb_traj(traj, no_GLX=False):
     sele_str = "backbone"
@@ -532,6 +540,30 @@ def bb_ligand_rmsd(native, decoy):
     return l_rmsd
 
 class bb_interfacial_rmsd_angstroms:
+
+    def __init__(self, native, res_group1, res_group2, cutoff_angstroms=10., verbose=False):
+        self.native = native[0]  # ensure only a single frame is passed
+
+        contact_pairs = np.array([(i,j) for i in res_group1 for j in res_group2])
+        is_contact = (10.*md.compute_contacts(self.native, contacts=contact_pairs, scheme='closest')[0]<cutoff_angstroms)[0]
+        contacts = contact_pairs[is_contact]
+                
+        self.interface_residues = sorted(set(contacts[:,0]).union(set(contacts[:,1])))
+        if verbose:
+            print '%i interface residues (%i,%i)' % (
+                    len(self.interface_residues), len(set(contacts[:,0])), len(set(contacts[:,1])))
+        self.interface_a_ids_n = np.array([a.index for a in native.topology.atoms
+                                                   if  a.residue.index in self.interface_residues and a.name in ['N', 'CA', 'C', 'O']])
+        self.native_islice = native.atom_slice(self.interface_a_ids_n)
+
+    def compute_irmsd(self, traj):
+        interface_a_ids_t = np.array([a.index for a in traj.topology.atoms
+                                              if  a.residue.index in self.interface_residues and a.name in ['N', 'CA', 'C', 'O']])
+        traj = traj.superpose(self.native, atom_indices=interface_a_ids_t, ref_atom_indices=self.interface_a_ids_n)
+
+        return 10.*md.rmsd(traj.atom_slice(interface_a_ids_t), self.native_islice)
+
+class bb_interfacial_rmsd_angstroms_old:
 
     def __init__(self, native, res_group1, res_group2, cutoff_angstroms=10., verbose=False):
         self.native = get_bb_traj(native[0])  # ensure only a single frame is passed
@@ -554,25 +586,32 @@ class bb_interfacial_rmsd_angstroms:
 
 class ca_interfacial_rmsd_angstroms:
 
-    def __init__(self, native, group1, group2, ca_cutoff_angstroms=10., verbose=True):
+    def __init__(self, native, group1, group2, cutoff_angstroms=10., verbose=True):
         self.native = native[0]  # ensure only a single frame is passed
 
         res_group1, res_group2 = [np.array(sorted(set([native.topology.atom(i).residue.index for i in g])))
                 for g in (group1,group2)]
 
         contact_pairs = np.array([(i,j) for i in res_group1 for j in res_group2])
-        is_contact = (10.*md.compute_contacts(native, contacts=contact_pairs, scheme='ca')[0]<ca_cutoff_angstroms)[0]
+        is_contact = (10.*md.compute_contacts(native, contacts=contact_pairs, scheme='closest')[0]<cutoff_angstroms)[0]
         contacts = contact_pairs[is_contact]
                 
-        interface_residues = sorted(set(contacts[:,0]).union(set(contacts[:,1])))
+        self.interface_residues = sorted(set(contacts[:,0]).union(set(contacts[:,1])))
         if verbose:
             print '%i interface residues (%i,%i)' % (
-                    len(interface_residues), len(set(contacts[:,0])), len(set(contacts[:,1])))
-        self.interface_atom_indices = np.array([a.index for a in native.topology.atoms
-                                                   if  a.residue.index in interface_residues])
+                    len(self.interface_residues), len(set(contacts[:,0])), len(set(contacts[:,1])))
+        self.interface_a_ids_n = np.array([a.index for a in native.topology.atoms
+                                                   if  a.residue.index in self.interface_residues and a.name == "CA"])
+        self.native_islice = native.atom_slice(self.interface_a_ids_n)
 
     def compute_irmsd(self, traj):
-        return 10.*md.rmsd(traj, self.native, atom_indices=self.interface_atom_indices)
+        print self.interface_a_ids_n
+        interface_a_ids_t = np.array([a.index for a in traj.topology.atoms
+                                              if  a.residue.index in self.interface_residues and a.name == "CA"])
+        print [traj.top.atom(a_idx).residue.name for a_idx in interface_a_ids_t]
+        print [self.native.top.atom(a_idx).residue.name for a_idx in self.interface_a_ids_n]
+        traj = traj.superpose(self.native, atom_indices=interface_a_ids_t, ref_atom_indices=self.interface_a_ids_n)
+        return 10.*md.rmsd(traj.atom_slice(interface_a_ids_t), self.native_islice)
     
 
 def ca_rmsd_angstroms(traj, native, cut_tails=False, verbose=True):
