@@ -188,32 +188,33 @@ def main():
             ch_imp += memb_count
         imp_break_pairs = np.array(imp_break_pairs)
         n_restraints = len(imp_break_pairs)
-        print "Adding springs between improper break atoms:", imp_break_pairs
+        if n_restraints > 0:
+            print "Adding springs between improper break atoms:", imp_break_pairs
 
-        xyz = t.root.input.pos[:,:,0]
-        pair_dists = []
-        for pair in imp_break_pairs:
-            pair_dists.append(xyz[pair[1]] - xyz[pair[0]])
-        pair_dists = np.linalg.norm(pair_dists, axis=1)
+            xyz = t.root.input.pos[:,:,0]
+            pair_dists = []
+            for pair in imp_break_pairs:
+                pair_dists.append(xyz[pair[1]] - xyz[pair[0]])
+            pair_dists = np.linalg.norm(pair_dists, axis=1)
 
-        pair_spring_consts = np.full(n_restraints, 48.)
+            pair_spring_consts = np.full(n_restraints, 48.)
 
-        grp = t.root.input.potential.dist_spring
+            grp = t.root.input.potential.dist_spring
 
-        idx = grp.id[:]
-        equil_dist = grp.equil_dist[:]
-        spring_const = grp.spring_const[:]
-        bonded_atoms = grp.bonded_atoms[:]
+            idx = grp.id[:]
+            equil_dist = grp.equil_dist[:]
+            spring_const = grp.spring_const[:]
+            bonded_atoms = grp.bonded_atoms[:]
 
-        grp.id._f_remove()
-        grp.equil_dist._f_remove()
-        grp.spring_const._f_remove()
-        grp.bonded_atoms._f_remove()
+            grp.id._f_remove()
+            grp.equil_dist._f_remove()
+            grp.spring_const._f_remove()
+            grp.bonded_atoms._f_remove()
 
-        create_array(t, grp, 'id',           obj=np.concatenate((idx,          imp_break_pairs), axis=0))
-        create_array(t, grp, 'equil_dist',   obj=np.concatenate((equil_dist,   pair_dists), axis=0))
-        create_array(t, grp, 'spring_const', obj=np.concatenate((spring_const, pair_spring_consts), axis=0))
-        create_array(t, grp, 'bonded_atoms', obj=np.concatenate((bonded_atoms, np.zeros(n_restraints, dtype='int')), axis=0))
+            create_array(t, grp, 'id',           obj=np.concatenate((idx,          imp_break_pairs), axis=0))
+            create_array(t, grp, 'equil_dist',   obj=np.concatenate((equil_dist,   pair_dists), axis=0))
+            create_array(t, grp, 'spring_const', obj=np.concatenate((spring_const, pair_spring_consts), axis=0))
+            create_array(t, grp, 'bonded_atoms', obj=np.concatenate((bonded_atoms, np.zeros(n_restraints, dtype='int')), axis=0))
 
     t.close()
 
