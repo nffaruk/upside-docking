@@ -365,20 +365,34 @@ def replex_demultiplex(list_of_replex_traj, replica_index):
 
 class f_nat_computer:
 
-    def __init__(self, r_pdb, l_pdb, cutoff = 5.):
+    def __init__(self, r_pdb, l_pdb, scheme='closest', cutoff = 5., compute_distances=True):
+        self.scheme = scheme
         self.cutoff = cutoff
+        self.compute_distances = compute_distances
         combo_pdb = r_pdb.stack(l_pdb)
 
-        n_res_r = r_pdb.n_residues
-        n_res_l = l_pdb.n_residues
-        res_g1 = np.arange(n_res_r)
-        res_g2 = np.arange(n_res_l) + n_res_r
-        self.pair_list = np.array([(res1,res2) for res1 in res_g1 for res2 in res_g2])
+        if self.compute_distances:
+            a_g1 = np.arange(r_pdb.n_atoms)
+            a_g2 = np.arange(l_pdb.n_atoms) + r_pdb.n_atoms
+            pair_list = np.array([(a1,a2) for a1 in a_g1 for a2 in a_g2])
+            contact_data = md.compute_distances(combo_pdb, pair_list, periodic=False, opt=True)
+            is_contact = (10.*contact_data < self.cutoff)[0]
+            res_pairs = []
+            for p in pair_list[is_contact]:
+                res1 = combo_pdb.top.atom(p[0]).residue.index
+                res2 = combo_pdb.top.atom(p[1]).residue.index
+                if (res1, res2) not in res_pairs:
+                    res_pairs.append((res1, res2))
+            res_pairs = np.array(res_pairs)
+            self.contacts_n = res_pairs
+            self.n_contacts_n = len(self.contacts_n)
+        else:
+            self.pair_list = np.array([(res1,res2) for res1 in res_g1 for res2 in res_g2])
 
-        contact_data = md.compute_contacts(combo_pdb, contacts=self.pair_list, scheme='closest')
-        is_contact = (10.*contact_data[0] < self.cutoff)[0]
-        self.contacts_n = self.pair_list[is_contact]
-        self.n_contacts_n = len(self.contacts_n)
+            contact_data = md.compute_contacts(combo_pdb, contacts=self.pair_list, scheme=self.scheme)
+            is_contact = (10.*contact_data[0] < self.cutoff)[0]
+            self.contacts_n = self.pair_list[is_contact]
+            self.n_contacts_n = len(self.contacts_n)
 
         # trick into treating rows as a single value for np.intersect1d()
         # https://stackoverflow.com/questions/8317022/get-intersecting-rows-across-two-2d-numpy-arrays
@@ -389,9 +403,24 @@ class f_nat_computer:
     def compute_f_nat(self, r_pdb, l_decoy):
         combo_pdb = r_pdb.stack(l_decoy)
 
-        contact_data = md.compute_contacts(combo_pdb, contacts=self.pair_list, scheme='closest')
-        is_contact = (10.*contact_data[0] < self.cutoff)[0]
-        contacts_d = self.pair_list[is_contact]
+        if self.compute_distances:
+            a_g1 = np.arange(r_pdb.n_atoms)
+            a_g2 = np.arange(l_decoy.n_atoms) + r_pdb.n_atoms
+            pair_list = np.array([(a1,a2) for a1 in a_g1 for a2 in a_g2])
+            contact_data = md.compute_distances(combo_pdb, pair_list, periodic=False, opt=True)
+            is_contact = (10.*contact_data < self.cutoff)[0]
+            res_pairs = []
+            for p in pair_list[is_contact]:
+                res1 = combo_pdb.top.atom(p[0]).residue.index
+                res2 = combo_pdb.top.atom(p[1]).residue.index
+                if (res1, res2) not in res_pairs:
+                    res_pairs.append((res1, res2))
+            res_pairs = np.array(res_pairs)
+            contacts_d = res_pairs
+        else:
+            contact_data = md.compute_contacts(combo_pdb, contacts=self.pair_list, scheme=self.scheme)
+            is_contact = (10.*contact_data[0] < self.cutoff)[0]
+            contacts_d = self.pair_list[is_contact]
 
         nr_d, nc_d = contacts_d.shape
         dtype_d = {'names':['f{}'.format(i) for i in xrange(nc_d)],
@@ -520,7 +549,10 @@ def get_r_sele_bb(r_pdb_ref, l_pdb_ref, traj, rl_chains, get_l=False):
     r_sele_bb_n = [idx for idx in a_sele_bb_n if combo_pdb_ref.top.atom(idx).residue.chain.index in ch_x_n]
 
     a_sele_bb_t = sele_bb(traj, a_sele_t)
-    r_sele_bb_t = a_sele_bb_t[:len(r_sele_bb_n)]
+    if not get_l:
+        r_sele_bb_t = a_sele_bb_t[:len(r_sele_bb_n)]
+    else:
+        r_sele_bb_t = a_sele_bb_t[-len(r_sele_bb_n):]
 
     return r_sele_bb_n, r_sele_bb_t
 
@@ -541,12 +573,28 @@ def bb_ligand_rmsd(native, decoy):
 
 class bb_interfacial_rmsd_angstroms:
 
-    def __init__(self, native, res_group1, res_group2, cutoff_angstroms=10., verbose=False):
+    def __init__(self, native, res_group1, res_group2, scheme='closest', cutoff_angstroms=10., compute_distances=True, verbose=False):
         self.native = native[0]  # ensure only a single frame is passed
+        self.compute_distances = compute_distances
 
-        contact_pairs = np.array([(i,j) for i in res_group1 for j in res_group2])
-        is_contact = (10.*md.compute_contacts(self.native, contacts=contact_pairs, scheme='closest')[0]<cutoff_angstroms)[0]
-        contacts = contact_pairs[is_contact]
+        if self.compute_distances:
+            a_g1 = np.arange(native.top.residue(res_group1[-1]).atom(-1).index)
+            a_g2 = np.arange(native.top.residue(res_group2[0]).atom(0).index, native.top.residue(res_group2[-1]).atom(-1).index)
+            pair_list = np.array([(a1,a2) for a1 in a_g1 for a2 in a_g2])
+            contact_data = md.compute_distances(native, pair_list, periodic=False, opt=True)
+            is_contact = (10.*contact_data < cutoff_angstroms)[0]
+            res_pairs = []
+            for p in pair_list[is_contact]:
+                res1 = native.top.atom(p[0]).residue.index
+                res2 = native.top.atom(p[1]).residue.index
+                if (res1, res2) not in res_pairs:
+                    res_pairs.append((res1, res2))
+            res_pairs = np.array(res_pairs)
+            contacts = res_pairs
+        else:
+            contact_pairs = np.array([(i,j) for i in res_group1 for j in res_group2])
+            is_contact = (10.*md.compute_contacts(self.native, contacts=contact_pairs, scheme=scheme)[0]<cutoff_angstroms)[0]
+            contacts = contact_pairs[is_contact]
                 
         self.interface_residues = sorted(set(contacts[:,0]).union(set(contacts[:,1])))
         if verbose:
