@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
-import numpy as np
-import tables as tb
 import sys,os
 import cPickle
+from itertools import count, groupby
+import numpy as np
+import tables as tb
 
 three_letter_aa = dict(
         A='ALA', C='CYS', D='ASP', E='GLU',
@@ -1628,6 +1629,16 @@ def main():
 
     args_group = t.create_group(input, 'args')
     for k,v in sorted(vars(args).items()):
+        # Convert back to segment ranges so as not to exceed HDF5 header limit
+        if k == "restraint_group":
+            v_mod = ""
+            for i, restr in enumerate(v):
+                if i > 0:
+                    v_mod += ","
+                restr= (list(x) for _,x in groupby(restr, lambda x, c=count(): next(c)-x))
+                restr= ",".join("-".join(map(str,(g[0],g[-1])[:len(g)])) for g in restr)
+                v_mod += restr
+            v = v_mod
         args_group._v_attrs[k] = v
     args_group._v_attrs['invocation'] = ' '.join(sys.argv[:])
 
