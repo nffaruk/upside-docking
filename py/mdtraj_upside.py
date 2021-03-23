@@ -422,12 +422,15 @@ class f_nat_computer:
             is_contact = (10.*contact_data[0] < self.cutoff)[0]
             contacts_d = self.pair_list[is_contact]
 
-        nr_d, nc_d = contacts_d.shape
-        dtype_d = {'names':['f{}'.format(i) for i in xrange(nc_d)],
-                   'formats':nc_d * [contacts_d.dtype]}
+        if contacts_d.size > 0:
+            nr_d, nc_d = contacts_d.shape
+            dtype_d = {'names':['f{}'.format(i) for i in xrange(nc_d)],
+                       'formats':nc_d * [contacts_d.dtype]}
 
-        n_common = len(np.intersect1d(self.contacts_n.view(self.dtype_n), contacts_d.view(dtype_d)))
-        f_nat = float(n_common)/float(self.n_contacts_n)
+            n_common = len(np.intersect1d(self.contacts_n.view(self.dtype_n), contacts_d.view(dtype_d)))
+            f_nat = float(n_common)/float(self.n_contacts_n)
+        else:
+            f_nat = 0.
 
         return f_nat
 
