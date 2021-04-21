@@ -386,6 +386,7 @@ class f_nat_computer:
             res_pairs = np.array(res_pairs)
             self.contacts_n = res_pairs
             self.n_contacts_n = len(self.contacts_n)
+            self.r_ires = np.unique(res_pairs[:, 0])
         else:
             self.pair_list = np.array([(res1,res2) for res1 in res_g1 for res2 in res_g2])
 
@@ -404,7 +405,7 @@ class f_nat_computer:
         combo_pdb = r_pdb.stack(l_decoy)
 
         if self.compute_distances:
-            a_g1 = np.arange(r_pdb.n_atoms)
+            a_g1 = [a.index for resid in self.r_ires for a in combo_pdb.top.residue(resid).atoms] #np.arange(r_pdb.n_atoms)
             a_g2 = np.arange(l_decoy.n_atoms) + r_pdb.n_atoms
             pair_list = np.array([(a1,a2) for a1 in a_g1 for a2 in a_g2])
             contact_data = md.compute_distances(combo_pdb, pair_list, periodic=False, opt=True)
@@ -640,27 +641,34 @@ class ca_interfacial_rmsd_angstroms:
     def __init__(self, native, group1, group2, cutoff_angstroms=10., verbose=True):
         self.native = native[0]  # ensure only a single frame is passed
 
+        self.in_contact = True
         res_group1, res_group2 = [np.array(sorted(set([native.topology.atom(i).residue.index for i in g])))
                 for g in (group1,group2)]
 
         contact_pairs = np.array([(i,j) for i in res_group1 for j in res_group2])
-        is_contact = (10.*md.compute_contacts(native, contacts=contact_pairs, scheme='closest')[0]<cutoff_angstroms)[0]
-        contacts = contact_pairs[is_contact]
-                
-        self.interface_residues = sorted(set(contacts[:,0]).union(set(contacts[:,1])))
-        if verbose:
-            print '%i interface residues (%i,%i)' % (
-                    len(self.interface_residues), len(set(contacts[:,0])), len(set(contacts[:,1])))
-        self.interface_a_ids_n = np.array([a.index for a in native.topology.atoms
-                                                   if  a.residue.index in self.interface_residues and a.name == "CA"])
-        self.native_islice = native.atom_slice(self.interface_a_ids_n)
+        is_contact = (10.*md.compute_contacts(native, contacts=contact_pairs, scheme='ca')[0]<cutoff_angstroms)[0]
+        if not np.any(is_contact):
+            self.in_contact = False
+
+        if self.in_contact:
+            contacts = contact_pairs[is_contact]
+                    
+            self.interface_residues = sorted(set(contacts[:,0]).union(set(contacts[:,1])))
+            if verbose:
+                print '%i interface residues (%i,%i)' % (
+                        len(self.interface_residues), len(set(contacts[:,0])), len(set(contacts[:,1])))
+            self.interface_a_ids_n = np.array([a.index for a in native.topology.atoms
+                                                       if  a.residue.index in self.interface_residues and a.name == "CA"])
+            self.native_islice = native.atom_slice(self.interface_a_ids_n)
 
     def compute_irmsd(self, traj):
-        print self.interface_a_ids_n
+        if not self.in_contact:
+            raise ValueError("Reference subunits were not in contact, no ref interface residues available.")
+        # print self.interface_a_ids_n
         interface_a_ids_t = np.array([a.index for a in traj.topology.atoms
                                               if  a.residue.index in self.interface_residues and a.name == "CA"])
-        print [traj.top.atom(a_idx).residue.name for a_idx in interface_a_ids_t]
-        print [self.native.top.atom(a_idx).residue.name for a_idx in self.interface_a_ids_n]
+        # print [traj.top.atom(a_idx).residue.name for a_idx in interface_a_ids_t]
+        # print [self.native.top.atom(a_idx).residue.name for a_idx in self.interface_a_ids_n]
         traj = traj.superpose(self.native, atom_indices=interface_a_ids_t, ref_atom_indices=self.interface_a_ids_n)
         return 10.*md.rmsd(traj.atom_slice(interface_a_ids_t), self.native_islice)
     
