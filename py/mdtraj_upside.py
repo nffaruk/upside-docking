@@ -388,6 +388,8 @@ class f_nat_computer:
             self.n_contacts_n = len(self.contacts_n)
             self.r_ires = np.unique(res_pairs[:, 0])
         else:
+            res_g1 = np.arange(r_pdb.n_residues)
+            res_g2 = np.arange(l_pdb.n_residues) + r_pdb.n_residues
             self.pair_list = np.array([(res1,res2) for res1 in res_g1 for res2 in res_g2])
 
             contact_data = md.compute_contacts(combo_pdb, contacts=self.pair_list, scheme=self.scheme)
@@ -440,16 +442,17 @@ class f_nat_computer_traj:
         self.scheme = scheme
         self.cutoff = cutoff
         self.pair_list = np.array([(res1,res2) for res1 in res_r for res2 in res_l])
-        contact_data = md.compute_contacts(native, contacts=self.pair_list, scheme=self.scheme)
-        is_contact = (10.*contact_data[0] < self.cutoff)[0]
-        self.contacts_n = self.pair_list[is_contact].tolist()
+        contact_data = md.compute_contacts(native, contacts=self.pair_list, scheme=self.scheme, periodic=False)
+        self.is_contact = (10.*contact_data[0] < self.cutoff)[0]
+        self.contacts_n = self.pair_list[self.is_contact].tolist()
         self.n_contacts_n = len(self.contacts_n)
     
     def compute_f_nat(self, traj):
+        pl_reduced = self.pair_list[self.is_contact]
         n_frames = traj.n_frames
-        contact_data = md.compute_contacts(traj, contacts=self.pair_list, scheme=self.scheme)
+        contact_data = md.compute_contacts(traj, contacts=pl_reduced, scheme=self.scheme, periodic=False)
         is_contact = (10.*contact_data[0] < self.cutoff)
-        self.contacts_traj = [self.pair_list[frame].tolist() for frame in is_contact]
+        self.contacts_traj = [pl_reduced[frame].tolist() for frame in is_contact]
         
         f_nat = np.zeros(n_frames)
         for frame in xrange(n_frames):
@@ -569,10 +572,13 @@ def get_bb_traj(traj, no_GLX=False):
     traj = traj.atom_slice(bb_sele)
     return traj
 
-def bb_ligand_rmsd(native, decoy):
+def bb_ligand_rmsd(native, decoy, all_frames=False):
     native = get_bb_traj(native)
     decoy = get_bb_traj(decoy)
-    l_rmsd = 10.*np.sqrt(np.mean(np.sum(np.square(native.xyz[0] - decoy.xyz[0]), axis=1)))
+    if not all_frames:
+        l_rmsd = 10.*np.sqrt(np.mean(np.sum(np.square(native.xyz[0] - decoy.xyz[0]), axis=1)))
+    else:
+        l_rmsd = 10.*np.sqrt(np.mean(np.sum(np.square(native.xyz[0] - decoy.xyz), axis=2), axis=1))
     return l_rmsd
 
 class bb_interfacial_rmsd_angstroms:
