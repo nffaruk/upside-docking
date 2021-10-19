@@ -1330,6 +1330,41 @@ def chain_endpts(n_res, chain_first_residue, i):
 
     return first_res, next_first_res
 
+def add_docking_terms(config_fn, rot_param, env_param_dict):
+    """Add inter-protein energy terms to Upside container file.
+    
+    Note: this is not yet integrated into the parser options and must be called directly
+    by importing into the setup/run script.
+    """
+    with tb.open_file(config_fn, 'a') as t:
+        seq = t.root.input.sequence[:]
+        seq = [(x if x != 'CPR' else 'PRO') for x in seq]
+        n_res = len(seq)
+        chain_first_residue = t.root.input.chain_break.chain_first_residue[:]
+        rl_chains = t.root.input.chain_break.rl_chains[:]
+
+        # Create inter_rotamer node by copying default rotamer node
+        g = t.get_node("/input/potential/rotamer")
+        g_new = g._f_copy(newname="inter_rotamer", recursive=True)
+
+        # First arg is placement_fixed_point_vector_only (rotamer positions). Next args: prob_nodes, which consist of 
+        # placement_scalar (rotamer 1body energies), hbond_coverage, and hbond_coverage_hydrophobe. Remove hbond args
+        inter_args = g_new._v_attrs.arguments[:][:2]
+        g_new._v_attrs.arguments = inter_args
+        g_new.pair_interaction._v_attrs.l_start = chain_first_residue[rl_chains[0]-1]
+        g_new.pair_interaction.interaction_param[:] = rot_param[:]
+
+        # Create inter env coverage node by copying default node
+        g = t.get_node("/input/potential/environment_coverage")
+        g_new = g._f_copy(newname="inter_environment_coverage", recursive=True)
+        g_new._v_attrs.l_start = chain_first_residue[rl_chains[0]-1]
+
+        # Create inter env coupling node by copying default node
+        g = t.get_node("/input/potential/nonlinear_coupling_environment")
+        g_new = g._f_copy(newname="inter_nonlinear_coupling_environment", recursive=True)
+        g_new._v_attrs.arguments = np.array(['inter_environment_coverage'])
+        g_new.coeff[:] = env_param_dict["coeff"][:]
+        g_new.weights[:] = env_param_dict["weights"][:].flatten()    
 
 def main():
     import argparse
