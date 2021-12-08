@@ -141,7 +141,7 @@ def mp_recalc_pe((config_fn, frame)):
 is_unbound = False # Whether using the unbound or bound conformations of the substituents
 default_pe = False # Whether only using the folding forcefield
 do_analysis = True
-do_ana_only = False
+do_ana_only = True
 n_rep = 3 # Number of simulation replicates
 pool_size = 4 # Number of subprocesses for multiprocessing. Used for SCWRLing and post-sim energy re-evaluation.
 seed = 1 # Random seed to use for sims

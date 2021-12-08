@@ -1154,6 +1154,7 @@ def write_rotamer(fasta, interaction_library, damping, sc_node_name, pl_node_nam
     g._v_attrs.tol      = 1e-3
     g._v_attrs.damping  = damping
     g._v_attrs.iteration_chunk_size = 2
+    g._v_attrs.log_suffix = 0
 
     pg = t.create_group(g, "pair_interaction")
 
@@ -1351,6 +1352,7 @@ def add_docking_terms(config_fn, rot_param, env_param_dict):
         # placement_scalar (rotamer 1body energies), hbond_coverage, and hbond_coverage_hydrophobe. Remove hbond args
         inter_args = g_new._v_attrs.arguments[:][:2]
         g_new._v_attrs.arguments = inter_args
+        g_new._v_attrs.log_suffix = 1
         g_new.pair_interaction._v_attrs.l_start = chain_first_residue[rl_chains[0]-1]
         g_new.pair_interaction.interaction_param[:] = rot_param[:]
 
